@@ -1,0 +1,26 @@
+{
+  "name": "mcp-memory-graphdb",
+  "version": "0.1.0",
+  "description": "MCP server — persistent LLM memory backed by DuckDB graph",
+  "type": "module",
+  "main": "dist/mcp.js",
+  "bin": {
+    "mcp-memory-graphdb": "dist/mcp.js"
+  },
+  "scripts": {
+    "start": "node dist/mcp.js",
+    "dev":   "node src/mcp.js",
+    "build": "node build.mjs",
+    "test":  "node test/unit.js && node test/integration.js src && node test/integration.js dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@duckdb/node-api": "latest",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.24.2",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

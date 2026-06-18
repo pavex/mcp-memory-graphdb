@@ -1,0 +1,45 @@
+{
+  "manifest_version": "1.0",
+  "name": "mcp-memory-graphdb",
+  "version": "0.1.0",
+  "description": "Persistent LLM memory backed by a DuckDB graph database. Stores nodes, edges and relationships that survive across sessions.",
+  "author": {
+    "name": "Krabe"
+  },
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/mcp.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/mcp.js", "${user_config.db_name}"]
+    }
+  },
+  "tools": [
+    { "name": "add_node",     "description": "Add a new node to the graph." },
+    { "name": "update_node",  "description": "Update labels and/or properties of a node." },
+    { "name": "delete_node",  "description": "Delete a node and all its edges." },
+    { "name": "get_node",     "description": "Fetch a single node by ID." },
+    { "name": "add_edge",     "description": "Add a directed edge between two nodes." },
+    { "name": "delete_edge",  "description": "Delete an edge by ID." },
+    { "name": "list_edges",   "description": "List edges, optionally filtered by source, target or type." },
+    { "name": "search",       "description": "Search nodes by text inside properties." },
+    { "name": "get_schema",   "description": "Return the current schema as YAML, including its revision number." },
+    { "name": "apply_schema", "description": "Apply additions, renames or removals to the schema." }
+  ],
+  "user_config": {
+    "db_name": {
+      "type": "string",
+      "title": "Database name or path",
+      "description": "Name of the memory database (e.g. 'work' → work.duckdb) or an absolute path. Leave empty for default.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32", "darwin"],
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

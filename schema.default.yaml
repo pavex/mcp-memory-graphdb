@@ -1,0 +1,77 @@
+# mcp-memory-graphdb — default schema
+# This file is loaded once, when the database has no schema.yaml yet
+# (i.e. the very first time the server runs against a fresh .duckdb file).
+#
+# After that, schema.yaml lives next to the database file and is the
+# source of truth — this file is never read or modified again.
+#
+# Customize this file to change what every NEW database starts with.
+# Existing databases are unaffected by changes here.
+
+revision: 0
+
+nodes:
+  project:
+    description: "Project or initiative"
+    properties:
+      name: string
+      status: string
+      description: string
+      url: string
+
+  topic:
+    description: "General theme or area of interest (e.g. AI, security, identity)"
+    properties:
+      name: string
+      description: string
+
+  technology:
+    description: "Programming language, framework, library or tool — subtype of topic"
+    properties:
+      name: string
+      version: string
+      note: string
+
+  concept:
+    description: "Abstract idea, pattern or principle"
+    properties:
+      name: string
+      summary: string
+
+  person:
+    description: "Real person"
+    properties:
+      name: string
+      role: string
+      note: string
+
+  article:
+    description: "Source, article, documentation or reference"
+    properties:
+      title: string
+      url: string
+      note: string
+
+  note:
+    description: "General note or observation"
+    properties:
+      title: string
+      content: string
+
+edges:
+  uses:
+    description: "Project or concept uses a technology"
+  belongs_to:
+    description: "Project or concept belongs to a topic"
+  part_of:
+    description: "Something is part of a larger entity"
+  created_by:
+    description: "Was created by a person"
+  works_on:
+    description: "Person works on a project"
+  knows:
+    description: "Person knows another person or concept"
+  relates_to:
+    description: "General relationship between any two nodes"
+  covers:
+    description: "Article or concept covers a topic or concept"

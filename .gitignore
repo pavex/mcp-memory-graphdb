@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.var/
+*.duckdb
+*.duckdb.wal
+.claude
