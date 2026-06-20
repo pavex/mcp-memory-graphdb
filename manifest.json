@@ -25,7 +25,9 @@
     { "name": "list_edges",   "description": "List edges, optionally filtered by source, target or type." },
     { "name": "search",       "description": "Search nodes by text inside properties." },
     { "name": "get_schema",   "description": "Return the current schema as YAML, including its revision number." },
-    { "name": "apply_schema", "description": "Apply additions, renames or removals to the schema." }
+    { "name": "apply_schema", "description": "Apply additions, renames or removals to the schema." },
+    { "name": "dreaming",     "description": "Get a paginated batch of nodes with their immediate edges, for guided cleanup." },
+    { "name": "bootstrap",    "description": "Load identity, user context and working rules at session start." }
   ],
   "user_config": {
     "db_name": {
