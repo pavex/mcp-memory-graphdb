@@ -26,6 +26,7 @@ If you're looking for a Claude memory MCP server, a persistent memory backend fo
   - [Removing a type](#removing-a-type)
   - [Instructing an agent to manage the schema](#instructing-an-agent-to-manage-the-schema)
 - [Dreaming — guided cleanup](#dreaming--guided-cleanup)
+- [Bootstrap — session identity](#bootstrap--session-identity)
 - [Project structure](#project-structure)
 - [Development](#development)
   - [Running tests](#running-tests)
@@ -126,7 +127,7 @@ On first startup against a fresh database, the server:
 2. Writes a default `schema.yaml` next to the database (this is schema **revision 0** — see [The default schema](#the-default-schema)).
 3. Exposes a `setup` MCP prompt that walks the agent through reviewing and optionally customizing that schema with the user.
 
-From then on, every conversation that connects to this server can read and write nodes and edges through the tools below, and the schema can be safely extended at any time through `apply_schema`. As the graph grows, `dreaming` provides a guided way to walk through it in batches and clean up duplicates or fill in missing relationships.
+From then on, every conversation that connects to this server can read and write nodes and edges through the tools below, and the schema can be safely extended at any time through `apply_schema`. As the graph grows, `dreaming` provides a guided way to walk through it in batches and clean up duplicates or fill in missing relationships. And at the start of each new conversation, `bootstrap` loads whatever identity and context the agent has chosen to remember about itself and the user (see [Bootstrap — session identity](#bootstrap--session-identity)).
 
 ## The tools
 
@@ -143,6 +144,7 @@ From then on, every conversation that connects to this server can read and write
 | `get_schema` | Return the current schema as YAML, including its revision number. |
 | `apply_schema` | Apply additions, renames or removals to the schema (see below). |
 | `dreaming` | Get a paginated batch of nodes with their immediate edges, for guided cleanup — merging duplicates and adding missing relationships (see below). |
+| `bootstrap` | Load whatever identity, user context and working rules the agent has saved for itself, in one call (see below). |
 
 There is deliberately **no raw query tool**. Letting an agent run arbitrary SQL against the memory store is a bigger attack surface than the convenience is worth; the tools above cover the realistic range of what an agent needs to read and write memory safely.
 
@@ -215,6 +217,22 @@ A typical pass looks like:
 
 In practice this has already caught real duplicate edges in this project's own memory — two identical `uses` relationships between the same two nodes, created a few sessions apart — found and cleaned up by an agent in a single `dreaming` pass.
 
+## Bootstrap — session identity
+
+A fresh conversation has no memory of who it's talking to or how it talked last time, unless something tells it. `bootstrap` solves that with the simplest possible mechanism: it reads one node, `_bootstrap`, and hands its content straight back.
+
+The server doesn't define what that node contains, doesn't validate it, and doesn't update it on its own. The agent owns it completely — typically a short block of plain text covering who the user is, what the agent's own role/name is, and any standing working rules worth repeating every session. The first time there's no `_bootstrap` node yet, the tool just says so and tells the agent how to create one with `add_node`.
+
+A typical first message in a new conversation looks like:
+
+> Call `bootstrap` at the start of this conversation, then continue normally.
+
+And updating it later is just as direct:
+
+> Update the bootstrap node — note that we're now using TypeScript strict mode by default.
+
+Because `bootstrap` takes no arguments and the tool description itself says to call it first, most setups never need this spelled out explicitly — it's there the moment the agent looks at what tools are available.
+
 ## Project structure
 
 ```
@@ -233,7 +251,7 @@ mcp-memory-graphdb/
 │   │   ├── DefaultSchema.js        # loads schema.default.yaml
 │   │   ├── SchemaManager.js        # the deterministic apply() process
 │   │   └── SchemaValidator.js      # strict structural validation (Zod)
-│   ├── Tools/                   # one file per tool group (incl. DreamingTool.js)
+│   ├── Tools/                   # one file per tool group (incl. DreamingTool.js, BootstrapTool.js)
 │   ├── Prompts/
 │   │   └── OnboardingPrompt.js      # the "setup" MCP prompt
 │   └── Utils/
