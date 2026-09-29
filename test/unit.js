@@ -5,7 +5,7 @@ import { ToolDefinitions } from '../src/Tools/ToolDefinitions.js';
 import { SchemaManager } from '../src/Schema/SchemaManager.js';
 import { SchemaTools } from '../src/Tools/SchemaTool.js';
 import { normalizeLabels } from '../src/Utils/Labels.js';
-import { isSimilar } from '../src/Utils/Similarity.js';
+import { isSimilar, isRelated } from '../src/Utils/Similarity.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -578,6 +578,21 @@ async function testVocabulary() {
   const w3 = await update_node({ id: 'c', labels: 'graph memorys' }, context);
   assert.match(w3.warnings[0], /label "memorys" is new - similar existing: memory/);
   assert.deepEqual(w3.node.properties, {}, 'labels-only update echoes no properties');
+
+  console.log(' - isRelated (shared whole word)...');
+  const related = [['static-export', 'static-site'], ['framework-finding', 'findings'], ['schema-foo', 'schema-parser'], ['ines', 'pavel-ines']];
+  for (const [a, b] of related) assert.ok(isRelated(a, b), `${a} ~ ${b} expected related`);
+  const unrelated = [['vcl4-status', 'vcl4-history'], ['ai-tools', 'ai'], ['static', 'dynamic']];
+  for (const [a, b] of unrelated) assert.ok(!isRelated(a, b), `${a} ~ ${b} expected unrelated`);
+
+  console.log(' - related labels reported, similar takes precedence...');
+  await add_node({ type: 'note', labels: 'static-site', properties: { title: 'R1' } }, context);
+  const r1w = await add_node({ type: 'note', labels: 'static-export', properties: { title: 'R2' } }, context);
+  assert.deepEqual(r1w.warnings, [
+    'label "static-export" is new - related existing: static-site (1). Reuse one of them if it means the same.'
+  ]);
+  const r2w = await add_node({ type: 'note', labels: 'static-sites', properties: { title: 'R3' } }, context);
+  assert.match(r2w.warnings[0], /label "static-sites" is new - similar existing: static-site/, 'similar wins over related');
 
   context.dispose();
   console.log(' ✓ Labels + vocabulary OK');

@@ -31,5 +31,5 @@ export function normalizeLabels(input) {
 export function labelWarnings(labels, existing) {
   const known = new Set(existing.map((e) => e.label.toLowerCase()));
   const fresh = normalizeLabels(labels).split(' ').filter((l) => l && !known.has(l.toLowerCase()));
-  return similarNameWarnings('label', fresh, existing.map((e) => ({ name: e.label, count: e.count })));
+  return similarNameWarnings('label', fresh, existing.map((e) => ({ name: e.label, count: e.count })), { related: true });
 }
