@@ -188,6 +188,15 @@ This relabels every existing node of that type in the database first, then updat
 
 The same pattern works for edges with `rename_edge`.
 
+To fold one type into another type that already exists, say so explicitly with `merge: true` — otherwise renaming onto an existing type is rejected:
+
+```yaml
+migrations:
+  - rename_node: { from: architecture-decision, to: decision, merge: true }
+```
+
+All nodes of the source type move to the target, the target keeps its definition, and the source disappears from the schema. The source may also be a type that exists only in the data — `get_schema` lists such types under `unknown_types` (typically nodes written before type validation existed).
+
 ### Removing a type
 
 Removal is rejected if any node or edge of that type still exists in the database — there is no implicit data deletion:

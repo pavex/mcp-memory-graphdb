@@ -552,6 +552,69 @@ async function testVocabulary() {
   console.log(' ✓ Labels + vocabulary OK');
 }
 
+// ---------------------------------------------------------------------------
+// Test: types present only in data — unknown_types + rename with merge
+// ---------------------------------------------------------------------------
+
+async function testTypeMerge() {
+  console.log('--- Unknown types + rename merge ---');
+
+  const context  = await makeContext();
+  const { repo, schema } = context;
+  const get_schema = SchemaTools.find(t => t.name === 'get_schema').handler;
+
+  // Legacy rows written before type validation existed (repo bypasses the tools)
+  await repo.addNode({ id: 'ad1', type: 'architecture-decision', labels: '', properties: { name: 'AD 1' } });
+  await repo.addNode({ id: 'ad2', type: 'architecture-decision', labels: '', properties: { name: 'AD 2' } });
+  await repo.addNode({ id: 's1', type: 'session_summary', labels: '', properties: { name: 'S 1' } });
+  await repo.addEdge({ id: 'le', type: 'legacy_link', source_id: 'ad1', target_id: 's1', properties: {} });
+  await schema.apply({ nodes: { decision: { description: 'A decision' } } });
+
+  console.log(' - get_schema lists unknown_types...');
+  const s1 = await get_schema({}, context);
+  assert.deepEqual(s1.unknown_types.nodes, ['architecture-decision', 'session_summary']);
+  assert.deepEqual(s1.unknown_types.edges, ['legacy_link']);
+
+  console.log(' - rename onto existing type without merge rejected...');
+  await assert.rejects(
+    () => schema.apply({ migrations: [{ rename_node: { from: 'architecture-decision', to: 'decision' } }] }),
+    /already exists\. Add merge: true/
+  );
+
+  console.log(' - data-only source without definition for new target rejected...');
+  await assert.rejects(
+    () => schema.apply({ migrations: [{ rename_node: { from: 'architecture-decision', to: 'adr' } }] }),
+    /define "adr" in the same call/
+  );
+
+  console.log(' - rename with merge: true from data-only type...');
+  const before = schema.get().nodes.decision;
+  await schema.apply({ migrations: [{ rename_node: { from: 'architecture-decision', to: 'decision', merge: true } }] });
+  assert.equal(await repo.countNodesByType('architecture-decision'), 0);
+  assert.equal(await repo.countNodesByType('decision'), 2);
+  assert.deepEqual(schema.get().nodes.decision, before, 'merge target must keep its definition');
+  assert.equal(schema.get().nodes['architecture-decision'], undefined);
+
+  console.log(' - data-only types added / renamed with definition...');
+  await schema.apply({
+    migrations: [{ rename_edge: { from: 'legacy_link', to: 'summarizes' } }],
+    nodes: { session_summary: { description: 'Summary of a work session' } },
+    edges: { summarizes: { description: 'Summary covers something' } }
+  });
+  const s2 = await get_schema({}, context);
+  assert.equal(s2.unknown_types, undefined, 'no unknown types expected after cleanup');
+  assert.equal((await repo.getEdge('le')).type, 'summarizes');
+
+  console.log(' - unknown source (not in schema nor data) still rejected...');
+  await assert.rejects(
+    () => schema.apply({ migrations: [{ rename_node: { from: 'ghost', to: 'decision', merge: true } }] }),
+    /does not exist in current schema or data/
+  );
+
+  context.dispose();
+  console.log(' ✓ Unknown types + rename merge OK');
+}
+
 async function run() {
   console.log('Starting tests...\n');
   await testInstaller();
@@ -560,6 +623,7 @@ async function run() {
   await testDreaming();
   await testMerge();
   await testVocabulary();
+  await testTypeMerge();
   console.log('\nAll tests passed!');
 }
 

@@ -111,25 +111,15 @@ export class SchemaManager {
 
     for (const m of migrations) {
       if (m.rename_node) {
-        const { from, to } = m.rename_node;
-        if (!current.nodes?.[from]) {
-          throw new Error(`rename_node: source type "${from}" does not exist in current schema.`);
-        }
-        if (current.nodes?.[to] && to !== from) {
-          throw new Error(`rename_node: target type "${to}" already exists. Choose a different name or remove it first.`);
-        }
-        renamedFromNodes.add(from);
+        await this.checkRename('rename_node', m.rename_node, current.nodes, incoming.nodes,
+          (type) => this.repo.countNodesByType(type));
+        renamedFromNodes.add(m.rename_node.from);
       }
 
       if (m.rename_edge) {
-        const { from, to } = m.rename_edge;
-        if (!current.edges?.[from]) {
-          throw new Error(`rename_edge: source type "${from}" does not exist in current schema.`);
-        }
-        if (current.edges?.[to] && to !== from) {
-          throw new Error(`rename_edge: target type "${to}" already exists. Choose a different name or remove it first.`);
-        }
-        renamedFromEdges.add(from);
+        await this.checkRename('rename_edge', m.rename_edge, current.edges, incoming.edges,
+          (type) => this.repo.countEdgesByType(type));
+        renamedFromEdges.add(m.rename_edge.from);
       }
 
       if (m.remove_node) {
@@ -209,11 +199,12 @@ export class SchemaManager {
 
     // Carry over renamed definitions under their new name, unless incoming
     // also redefines that name explicitly (then incoming wins, layered below).
+    // On merge into an existing target, the target's own definition is kept.
     for (const m of migrations) {
-      if (m.rename_node && !incoming.nodes?.[m.rename_node.to]) {
+      if (m.rename_node && !incoming.nodes?.[m.rename_node.to] && !current.nodes?.[m.rename_node.to]) {
         baseNodes[m.rename_node.to] = current.nodes[m.rename_node.from];
       }
-      if (m.rename_edge && !incoming.edges?.[m.rename_edge.to]) {
+      if (m.rename_edge && !incoming.edges?.[m.rename_edge.to] && !current.edges?.[m.rename_edge.to]) {
         baseEdges[m.rename_edge.to] = current.edges[m.rename_edge.from];
       }
     }
@@ -278,6 +269,25 @@ export class SchemaManager {
         removedEdges: removedEdgeList
       }
     };
+  }
+
+  // Pre-flight rules for rename_node / rename_edge:
+  // - source must be in the schema, or at least have rows in the DB (types
+  //   written before type validation existed can be migrated this way);
+  // - an existing target is only allowed with an explicit merge: true - the
+  //   rows move into it and the target's definition is kept;
+  // - a source that is not in the schema has no definition to carry over, so a
+  //   new target must be defined in the same call.
+  async checkRename(op, { from, to, merge }, currentTypes, incomingTypes, countRows) {
+    if (!currentTypes?.[from] && await countRows(from) === 0) {
+      throw new Error(`${op}: source type "${from}" does not exist in current schema or data.`);
+    }
+    if (currentTypes?.[to] && to !== from && !merge) {
+      throw new Error(`${op}: target type "${to}" already exists. Add merge: true to move all "${from}" rows into it, or choose a different name.`);
+    }
+    if (!currentTypes?.[from] && !currentTypes?.[to] && !incomingTypes?.[to]) {
+      throw new Error(`${op}: "${from}" has no schema definition to carry over - define "${to}" in the same call.`);
+    }
   }
 
   // ---------------------------------------------------------------------------

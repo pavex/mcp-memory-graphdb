@@ -30,7 +30,7 @@ export function buildOnboardingPrompt(schema) {
             'Rules:',
             '- Call get_schema to fetch the exact current YAML before building changes.',
             '- Adding a new node or edge type: just include it in the YAML with a description.',
-            '- Renaming a type: add a migrations entry { rename_node: { from, to } } or { rename_edge: { from, to } }. This is safe — it relabels every existing node/edge of that type in the database, no data is lost.',
+            '- Renaming a type: add a migrations entry { rename_node: { from, to } } or { rename_edge: { from, to } }. This is safe — it relabels every existing node/edge of that type in the database, no data is lost. Add merge: true to move them into a type that already exists.',
             '- Removing a type: add { remove_node: { type } } or { remove_edge: { type } }. This only succeeds if no node/edge of that type currently exists — rename it elsewhere first if it does.',
             '- nodes: and edges: are patches — existing types you do not mention stay exactly as they are. The only way to rename or remove a type is the migrations section above; omitting a type from the YAML never changes or deletes it.',
             '- If the user wants no changes, call apply_schema with the current schema unchanged (still bumps the revision to confirm the review).',

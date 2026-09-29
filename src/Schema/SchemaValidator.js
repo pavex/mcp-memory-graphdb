@@ -15,17 +15,20 @@ const EdgeTypeSchema = z.object({
   description: z.string().min(1, 'description is required')
 }).strict();
 
+// merge: true allows renaming into a type that already exists (rows move into it).
 const RenameNodeMigration = z.object({
   rename_node: z.object({
     from: z.string().min(1),
-    to: z.string().min(1)
+    to: z.string().min(1),
+    merge: z.boolean().optional()
   }).strict()
 }).strict();
 
 const RenameEdgeMigration = z.object({
   rename_edge: z.object({
     from: z.string().min(1),
-    to: z.string().min(1)
+    to: z.string().min(1),
+    merge: z.boolean().optional()
   }).strict()
 }).strict();
 

@@ -11,13 +11,28 @@ export const SchemaTools = [
       if (!s) {
         throw new Error('Schema not loaded.');
       }
-      return {
+      const nodeCounts = await repo.countNodesPerType();
+      const edgeCounts = await repo.countEdgesPerType();
+      const result = {
         success: true,
         revision: s.revision,
         yaml: schema.toYaml(),
-        node_counts: await repo.countNodesPerType(),
+        node_counts: nodeCounts,
         labels: await repo.listLabels()
       };
+
+      // Types present in the data but missing from the schema (written before
+      // type validation existed) - new writes of these types are rejected.
+      const unknownNodes = Object.keys(nodeCounts).filter((t) => !s.nodes?.[t]);
+      const unknownEdges = Object.keys(edgeCounts).filter((t) => !s.edges?.[t]);
+      if (unknownNodes.length || unknownEdges.length) {
+        result.unknown_types = {
+          nodes: unknownNodes,
+          edges: unknownEdges,
+          hint: 'These types exist in the data but not in the schema. Add them under nodes:/edges: with apply_schema, or move their rows into an existing type with a migration { rename_node: { from, to, merge: true } }.'
+        };
+      }
+      return result;
     }
   },
 
@@ -33,6 +48,8 @@ export const SchemaTools = [
       'RENAMING a node type: add a migrations entry { rename_node: { from: "old_name", to: "new_name" } }. This updates every existing node of that type in the database, then renames the schema entry. You may also redefine the new name under nodes: in the same call if its description/properties should change too.',
       '',
       'RENAMING an edge type: same pattern with { rename_edge: { from, to } }.',
+      '',
+      'MERGING a type into another existing type: { rename_node: { from, to, merge: true } } (or rename_edge). All rows of "from" move to "to", "to" keeps its definition, "from" disappears from the schema. Without merge: true an existing target is rejected. The source may also be a type that exists only in the data (see unknown_types in get_schema).',
       '',
       'REMOVING a node or edge type: add { remove_node: { type: "name" } } or { remove_edge: { type: "name" } }. This is REJECTED if any node/edge of that type still exists — rename it elsewhere first, or delete the individual nodes/edges, then remove the now-empty type.',
       '',

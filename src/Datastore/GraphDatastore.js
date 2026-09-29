@@ -407,6 +407,11 @@ export class GraphDatastore {
     return Object.fromEntries(rows.map((r) => [r.type, Number(r.n)]));
   }
 
+  async countEdgesPerType() {
+    const rows = await this._all(`SELECT type, count(*) AS n FROM edges GROUP BY type ORDER BY type`);
+    return Object.fromEntries(rows.map((r) => [r.type, Number(r.n)]));
+  }
+
   // --- Schema migrations ----------------------------------------------------------
 
   async countNodesByType(type) {
