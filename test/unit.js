@@ -18,6 +18,19 @@ async function makeRepo() {
   return repo;
 }
 
+// Tool context: in-memory repo + default schema (schema.yaml in a temp dir).
+async function makeContext() {
+  const repo = await makeRepo();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'graphdb-tools-test-'));
+  const schema = new SchemaManager(join(tmpDir, 'memory.duckdb'), repo);
+  schema.initDefault();
+  const dispose = () => {
+    repo.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  };
+  return { repo, schema, dispose };
+}
+
 // ---------------------------------------------------------------------------
 // Test: InstallerDatastore — tables exist after install
 // ---------------------------------------------------------------------------
@@ -48,8 +61,7 @@ async function testInstaller() {
 async function testDatastore() {
   console.log('--- GraphDatastore + Tools ---');
 
-  const repo    = await makeRepo();
-  const context = { repo };
+  const context = await makeContext();
   const handlers = new Map(ToolDefinitions.map(t => [t.name, t.handler]));
 
   const add_node    = handlers.get('add_node');
@@ -67,11 +79,20 @@ async function testDatastore() {
   assert.equal(r1.success, true);
   assert.equal(r1.node.id, 'alice');
   assert.equal(r1.node.type, 'person');
+  assert.deepEqual(r1.warnings, ['property "age" is not declared for type "person"'], 'undeclared property must warn');
+
+  // add_node — unknown type rejected
+  console.log(' - add_node (unknown type rejected)...');
+  await assert.rejects(
+    () => add_node({ type: 'spaceship', properties: { name: 'X' } }, context),
+    /Unknown node type "spaceship"/
+  );
 
   // add_node — auto id
   console.log(' - add_node (auto id)...');
   const r2 = await add_node({ type: 'person', properties: { name: 'Bob' } }, context);
   assert.equal(r2.success, true);
+  assert.equal(r2.warnings, undefined, 'no warnings expected when all properties are declared');
   assert.ok(r2.node.id, 'auto id missing');
   const bobId = r2.node.id;
 
@@ -86,7 +107,8 @@ async function testDatastore() {
 
   // update_node — merge properties
   console.log(' - update_node...');
-  await update_node({ id: 'alice', properties: { age: 31, city: 'Praha' } }, context);
+  const u1 = await update_node({ id: 'alice', properties: { age: 31, city: 'Praha' } }, context);
+  assert.equal(u1.warnings.length, 2, 'update_node must warn about undeclared properties');
   const r4 = await get_node({ id: 'alice' }, context);
   const props = r4.node.properties;
   assert.equal(props.name, 'Alice', 'original property lost after merge');
@@ -101,8 +123,15 @@ async function testDatastore() {
 
   // add_edge — custom id
   console.log(' - add_edge (custom id)...');
-  const r6 = await add_edge({ id: 'e-lives', source_id: 'alice', target_id: bobId, type: 'colleague' }, context);
+  const r6 = await add_edge({ id: 'e-lives', source_id: 'alice', target_id: bobId, type: 'relates_to' }, context);
   assert.equal(r6.edge.id, 'e-lives');
+
+  // add_edge — unknown type rejected
+  console.log(' - add_edge (unknown type rejected)...');
+  await assert.rejects(
+    () => add_edge({ source_id: 'alice', target_id: bobId, type: 'colleague' }, context),
+    /Unknown edge type "colleague"/
+  );
 
   // add_edge — both endpoints must exist
   console.log(' - add_edge (missing endpoint rejected)...');
@@ -164,7 +193,7 @@ async function testDatastore() {
   assert.equal(r14.count, 0, 'edges not deleted after node delete');
   await assert.rejects(() => get_node({ id: 'alice' }, context));
 
-  repo.close();
+  context.dispose();
   console.log(' ✓ GraphDatastore + Tools OK');
 }
 
@@ -313,8 +342,7 @@ async function testSchema() {
 async function testDreaming() {
   console.log('--- DreamingTool ---');
 
-  const repo    = await makeRepo();
-  const context = { repo };
+  const context = await makeContext();
   const handlers = new Map(ToolDefinitions.map(t => [t.name, t.handler]));
   const dreaming = handlers.get('dreaming');
   const add_node = handlers.get('add_node');
@@ -400,7 +428,7 @@ async function testDreaming() {
   assert.equal(cappedPerson.edges.out.length, 3, 'edge list must be capped at edge_cap');
   assert.equal(cappedPerson.edges.out_more, 2, 'out_more must report the remaining count beyond the cap');
 
-  repo.close();
+  context.dispose();
   console.log(' ✓ DreamingTool OK');
 }
 

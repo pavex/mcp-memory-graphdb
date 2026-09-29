@@ -137,11 +137,11 @@ From then on, every conversation that connects to this server can read and write
 
 | Tool | Purpose |
 |---|---|
-| `add_node` | Create a node — give it a `type`, optional `labels`, and a free-form `properties` object. |
+| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels`, and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
 | `update_node` | Merge new properties and/or replace labels on an existing node. |
 | `delete_node` | Delete a node. Any edges touching it are deleted automatically. |
 | `get_node` | Fetch a single node by ID. |
-| `add_edge` | Create a directed, typed edge between two existing nodes. |
+| `add_edge` | Create a directed, typed edge between two existing nodes. The type must exist in the schema; both nodes must exist. |
 | `delete_edge` | Delete a single edge by ID. |
 | `list_edges` | List edges, optionally filtered by `source_id`, `target_id` and/or `type`. |
 | `search` | Case-insensitive text search across node properties, optionally filtered by `type`. |
@@ -296,7 +296,6 @@ or simply run `mcpb.cmd` / `mcpb.sh`, which do the full install → build → pa
 This is **Phase 2** of the project — graph CRUD, a fully deterministic and validated schema system, and a guided dreaming/cleanup workflow. Open for the future:
 
 - Full-text search via DuckDB's FTS extension (current `search` uses a simple `ILIKE`).
-- Optional property-level validation against the schema on write.
 - A dedicated `merge_nodes` tool, if redirecting edges manually during dreaming proves too tedious in practice.
 
 ## Compatibility

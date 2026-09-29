@@ -9,7 +9,7 @@ export const BootstrapTool = {
     if (!node) {
       return {
         success: false,
-        message: 'No bootstrap node found. Create one with add_node({ id: "_bootstrap", type: "concept", properties: { ... } }) containing identity, user context and working rules.'
+        message: 'No bootstrap node found. Create one with add_node({ id: "_bootstrap", type: "concept", properties: { ... } }) (any node type from the schema works) containing identity, user context and working rules.'
       };
     }
     return { success: true, bootstrap: node };

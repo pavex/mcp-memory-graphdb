@@ -280,6 +280,36 @@ export class SchemaManager {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Write validation - node/edge types must exist in the schema (strict);
+  // properties not declared for the node type only produce warnings, so the
+  // agent can still store ad-hoc facts.
+  // ---------------------------------------------------------------------------
+
+  assertNodeType(type) {
+    if (!this.schema?.nodes?.[type]) {
+      const known = Object.keys(this.schema?.nodes ?? {}).join(', ');
+      throw new Error(`Unknown node type "${type}". Known types: ${known}. Add a new type with apply_schema first.`);
+    }
+  }
+
+  assertEdgeType(type) {
+    if (!this.schema?.edges?.[type]) {
+      const known = Object.keys(this.schema?.edges ?? {}).join(', ');
+      throw new Error(`Unknown edge type "${type}". Known types: ${known}. Add a new type with apply_schema first.`);
+    }
+  }
+
+  propertyWarnings(type, properties) {
+    const declared = this.schema?.nodes?.[type]?.properties;
+    if (!declared || !properties) {
+      return [];
+    }
+    return Object.keys(properties)
+      .filter((key) => !(key in declared))
+      .map((key) => `property "${key}" is not declared for type "${type}"`);
+  }
+
   summarize() {
     const s = this.schema;
     if (!s) {

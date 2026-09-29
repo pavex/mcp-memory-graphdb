@@ -1,26 +1,32 @@
 import { Schemas } from '../Utils/Schemas.js';
 
+// Attach warnings to a result only when there are some - keeps responses lean.
+const withWarnings = (result, warnings) => {
+  return warnings.length ? { ...result, warnings } : result;
+};
+
 export const NodeTools = [
   {
     name: 'add_node',
-    description: 'Add a new node to the graph. Returns the created node.',
+    description: 'Add a new node to the graph. The type must exist in the schema. Returns the created node (plus warnings for properties not declared in the schema).',
     inputSchema: Schemas.add_node,
-    handler: async (args, { repo }) => {
+    handler: async (args, { repo, schema }) => {
       const data = { labels: '', properties: {}, ...args };
+      schema.assertNodeType(data.type);
       const node = await repo.addNode(data);
-      return { success: true, node };
+      return withWarnings({ success: true, node }, schema.propertyWarnings(data.type, data.properties));
     }
   },
   {
     name: 'update_node',
     description: 'Update labels and/or properties of an existing node. Properties are merged into existing ones.',
     inputSchema: Schemas.update_node,
-    handler: async (args, { repo }) => {
+    handler: async (args, { repo, schema }) => {
       const node = await repo.updateNode(args);
       if (!node) {
         throw new Error(`Node not found: ${args.id}`);
       }
-      return { success: true, node };
+      return withWarnings({ success: true, node }, schema.propertyWarnings(node.type, args.properties));
     }
   },
   {

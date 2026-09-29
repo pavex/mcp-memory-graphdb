@@ -3,10 +3,11 @@ import { Schemas } from '../Utils/Schemas.js';
 export const EdgeTools = [
   {
     name: 'add_edge',
-    description: 'Add a directed edge between two existing nodes. Returns the created edge.',
+    description: 'Add a directed edge between two existing nodes. The type must exist in the schema. Returns the created edge.',
     inputSchema: Schemas.add_edge,
-    handler: async (args, { repo }) => {
+    handler: async (args, { repo, schema }) => {
       const data = { properties: {}, ...args };
+      schema.assertEdgeType(data.type);
       for (const [field, id] of [['source_id', data.source_id], ['target_id', data.target_id]]) {
         if (!await repo.getNode(id)) {
           throw new Error(`Node not found (${field}): ${id}`);
