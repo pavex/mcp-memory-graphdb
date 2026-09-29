@@ -1,27 +1,48 @@
 import { Schemas } from '../Utils/Schemas.js';
 import { labelWarnings } from '../Utils/Labels.js';
+import { similarNameWarnings } from '../Utils/Similarity.js';
 
 // Attach warnings to a result only when there are some - keeps responses lean.
 const withWarnings = (result, warnings) => {
   return warnings.length ? { ...result, warnings } : result;
 };
 
-// Must run before the write, so labels introduced by this call count as new.
+// Hints must be computed before the write, so names introduced by this call
+// count as new. Only new names resembling an existing one warn (typos,
+// '-'/'_' or plural variants); new unrelated names are silently accepted.
 const labelHints = async (repo, labels) => {
   return labels === undefined ? [] : labelWarnings(labels, await repo.listLabels());
+};
+
+// Existing keys = keys used by nodes of this type + keys declared in the schema.
+const propertyHints = async (repo, schema, type, properties) => {
+  const keys = Object.keys(properties ?? {});
+  if (!keys.length) {
+    return [];
+  }
+  const existing = new Map((await repo.listPropertyKeys(type)).map((k) => [k.key, k.count]));
+  for (const key of schema.declaredProperties(type)) {
+    if (!existing.has(key)) {
+      existing.set(key, 0);
+    }
+  }
+  return similarNameWarnings('property', keys, [...existing].map(([name, count]) => ({ name, count })));
 };
 
 export const NodeTools = [
   {
     name: 'add_node',
-    description: 'Add a new node to the graph. The type must exist in the schema. Returns the created node, plus warnings for properties not declared in the schema and for new labels that resemble existing ones.',
+    description: 'Add a new node to the graph. The type must exist in the schema; properties are free-form. Returns the created node, plus warnings when a new label or property key resembles an existing one (likely typo or variant).',
     inputSchema: Schemas.add_node,
     handler: async (args, { repo, schema }) => {
       const data = { labels: '', properties: {}, ...args };
       schema.assertNodeType(data.type);
-      const hints = await labelHints(repo, data.labels);
+      const hints = [
+        ...await propertyHints(repo, schema, data.type, data.properties),
+        ...await labelHints(repo, data.labels)
+      ];
       const node = await repo.addNode(data);
-      return withWarnings({ success: true, node }, [...schema.propertyWarnings(data.type, data.properties), ...hints]);
+      return withWarnings({ success: true, node }, hints);
     }
   },
   {
@@ -44,7 +65,10 @@ export const NodeTools = [
         }
       }
 
-      const hints = await labelHints(repo, args.labels);
+      const hints = [
+        ...await propertyHints(repo, schema, existing.type, args.properties),
+        ...await labelHints(repo, args.labels)
+      ];
 
       let node = existing;
       if (args.labels !== undefined || args.properties !== undefined) {
@@ -64,7 +88,7 @@ export const NodeTools = [
       if (mergeIds.length) {
         result.merge = await repo.mergeNodes(args.id, mergeIds);
       }
-      return withWarnings(result, [...schema.propertyWarnings(node.type, args.properties), ...hints]);
+      return withWarnings(result, hints);
     }
   },
   {

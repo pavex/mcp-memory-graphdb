@@ -4,7 +4,8 @@ import { GraphDatastore } from '../src/Datastore/GraphDatastore.js';
 import { ToolDefinitions } from '../src/Tools/ToolDefinitions.js';
 import { SchemaManager } from '../src/Schema/SchemaManager.js';
 import { SchemaTools } from '../src/Tools/SchemaTool.js';
-import { normalizeLabels, isSimilarLabel } from '../src/Utils/Labels.js';
+import { normalizeLabels } from '../src/Utils/Labels.js';
+import { isSimilar } from '../src/Utils/Similarity.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -81,7 +82,7 @@ async function testDatastore() {
   assert.equal(r1.success, true);
   assert.equal(r1.node.id, 'alice');
   assert.equal(r1.node.type, 'person');
-  assert.deepEqual(r1.warnings, ['property "age" is not declared for type "person"'], 'undeclared property must warn');
+  assert.equal(r1.warnings, undefined, 'a new property unrelated to existing keys must not warn');
 
   // add_node — unknown type rejected
   console.log(' - add_node (unknown type rejected)...');
@@ -110,7 +111,18 @@ async function testDatastore() {
   // update_node — merge properties
   console.log(' - update_node...');
   const u1 = await update_node({ id: 'alice', properties: { age: 31, city: 'Praha' } }, context);
-  assert.equal(u1.warnings.length, 2, 'update_node must warn about undeclared properties');
+  assert.equal(u1.warnings, undefined, 'free-form properties (age, city) must not warn');
+
+  // property keys resembling declared or already used keys warn
+  console.log(' - property key variants warn...');
+  const pw1 = await add_node({ type: 'person', properties: { name: 'P', roles: 'dev', 'note-career': 'x' } }, context);
+  assert.deepEqual(pw1.warnings, [
+    'property "roles" is new - similar existing: role. Reuse one of them unless the new property is really different.'
+  ], 'plural of a declared key warns; unrelated new key (note-career) does not');
+  const pw2 = await update_node({ id: pw1.node.id, properties: { note_career: 'y', citty: 'Brno' } }, context);
+  assert.equal(pw2.warnings.length, 2);
+  assert.match(pw2.warnings[0], /property "note_career" is new - similar existing: note-career \(1\)/);
+  assert.match(pw2.warnings[1], /property "citty" is new - similar existing: city \(1\)/);
   const r4 = await get_node({ id: 'alice' }, context);
   const props = r4.node.properties;
   assert.equal(props.name, 'Alice', 'original property lost after merge');
@@ -548,13 +560,14 @@ async function testVocabulary() {
   ]);
   assert.equal(s.labels_total, 3);
 
-  console.log(' - isSimilarLabel...');
+  console.log(' - isSimilar...');
   const similar = [['fixes', 'fix'], ['fix', 'bugfix'], ['bugs', 'bugfix'], ['agent', 'agents'], ['code-review', 'review'],
     ['findings', 'finding'], ['pavel-ines-cz', 'pavel-ines'], ['renaming', 'naming'], ['archtecture', 'architecture']];
-  for (const [a, b] of similar) assert.ok(isSimilarLabel(a, b), `${a} ~ ${b} expected similar`);
+  for (const [a, b] of similar) assert.ok(isSimilar(a, b), `${a} ~ ${b} expected similar`);
   const different = [['schema', 'schema-parser'], ['encoder', 'decoder'], ['web', 'website-tools'], ['mcp', 'mcp-google-gemini'],
-    ['php', 'pdo'], ['ai', 'api']];
-  for (const [a, b] of different) assert.ok(!isSimilarLabel(a, b), `${a} ~ ${b} expected different`);
+    ['php', 'pdo'], ['ai', 'api'], ['schema', 'schema3'], ['status_update_5', 'status_update_4'],
+    ['status_update_2', 'status_update'], ['vcl4_status', 'status'], ['vcl1_history', 'history']];
+  for (const [a, b] of different) assert.ok(!isSimilar(a, b), `${a} ~ ${b} expected different`);
 
   console.log(' - new labels similar to existing ones warn on write...');
   const w1 = await add_node({ type: 'note', labels: 'graphs memory brand-new', properties: { title: 'W' } }, context);

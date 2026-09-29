@@ -291,9 +291,9 @@ export class SchemaManager {
   }
 
   // ---------------------------------------------------------------------------
-  // Write validation - node/edge types must exist in the schema (strict);
-  // properties not declared for the node type only produce warnings, so the
-  // agent can still store ad-hoc facts.
+  // Write validation - node/edge types must exist in the schema (strict).
+  // Properties are free-form; only keys resembling an existing one produce a
+  // warning (see NodeTools / Similarity.js).
   // ---------------------------------------------------------------------------
 
   assertNodeType(type) {
@@ -310,14 +310,8 @@ export class SchemaManager {
     }
   }
 
-  propertyWarnings(type, properties) {
-    const declared = this.schema?.nodes?.[type]?.properties;
-    if (!declared || !properties) {
-      return [];
-    }
-    return Object.keys(properties)
-      .filter((key) => !(key in declared))
-      .map((key) => `property "${key}" is not declared for type "${type}"`);
+  declaredProperties(type) {
+    return Object.keys(this.schema?.nodes?.[type]?.properties ?? {});
   }
 
   summarize() {

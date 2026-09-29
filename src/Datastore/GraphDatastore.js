@@ -402,6 +402,18 @@ export class GraphDatastore {
     return rows.map((r) => ({ label: r.label, count: Number(r.n) }));
   }
 
+  // Property keys used by nodes of a type, with how many nodes use each.
+  async listPropertyKeys(type) {
+    const rows = await this._all(
+      `SELECT k AS key, count(*) AS n
+       FROM   nodes, unnest(json_keys(properties)) AS t(k)
+       WHERE  type = $1
+       GROUP  BY 1`,
+      [type]
+    );
+    return rows.map((r) => ({ key: r.key, count: Number(r.n) }));
+  }
+
   async countNodesPerType() {
     const rows = await this._all(`SELECT type, count(*) AS n FROM nodes GROUP BY type ORDER BY type`);
     return Object.fromEntries(rows.map((r) => [r.type, Number(r.n)]));
