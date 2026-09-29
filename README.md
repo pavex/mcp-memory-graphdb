@@ -137,15 +137,15 @@ From then on, every conversation that connects to this server can read and write
 
 | Tool | Purpose |
 |---|---|
-| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels` (space-separated string or array; normalized and de-duplicated on write), and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
-| `update_node` | Merge new properties and/or replace labels on an existing node. With `merge_from`, merge duplicate nodes into it (see [Dreaming](#dreaming--guided-cleanup)). |
+| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels` (space-separated string or array; normalized and de-duplicated on write), and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`; so is a new label that resembles an existing one (`fixes` → `bugfix`, `code-review` → `review`), so the agent can reuse the established label. |
+| `update_node` | Merge new properties and/or replace labels on an existing node. Returns only what changed (id, type, labels, changed properties) plus the same warnings as `add_node`. With `merge_from`, merge duplicate nodes into it (see [Dreaming](#dreaming--guided-cleanup)). |
 | `delete_node` | Delete a node. Any edges touching it are deleted automatically. |
 | `get_node` | Fetch a single node by ID. |
 | `add_edge` | Create a directed, typed edge between two existing nodes. The type must exist in the schema; both nodes must exist. |
 | `delete_edge` | Delete a single edge by ID. |
 | `list_edges` | List edges, optionally filtered by `source_id`, `target_id` and/or `type`. |
 | `search` | Case-insensitive text search across node properties, optionally filtered by `type`. |
-| `get_schema` | Return the current schema as YAML, including its revision number, plus the vocabulary in use: node counts per type and every label with its count. |
+| `get_schema` | Return the current schema as YAML, including its revision number, plus the vocabulary in use: node counts per type and labels used at least twice with their counts (`labels_total` gives the number of all distinct labels). Types found in the data but missing from the schema are listed under `unknown_types`. |
 | `apply_schema` | Apply additions, renames or removals to the schema (see below). |
 | `dreaming` | Get a paginated batch of nodes with their immediate edges, for guided cleanup — merging duplicates and adding missing relationships (see below). |
 | `bootstrap` | Load whatever identity, user context and working rules the agent has saved for itself, in one call (see below). |

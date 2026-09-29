@@ -4,7 +4,7 @@ import { Schemas } from '../Utils/Schemas.js';
 export const SchemaTools = [
   {
     name: 'get_schema',
-    description: 'Return the current schema as YAML string including revision number, node types and edge types, plus the vocabulary in use: node counts per type and all labels with their counts (reuse existing labels instead of inventing variants). Always call this before apply_schema to see the exact current state.',
+    description: 'Return the current schema as YAML string including revision number, node types and edge types, plus the vocabulary in use: node counts per type and labels used at least twice with their counts (labels_total = all distinct labels). Always call this before apply_schema to see the exact current state.',
     inputSchema: Schemas.get_schema,
     handler: async (_args, { schema, repo }) => {
       const s = schema.get();
@@ -13,12 +13,16 @@ export const SchemaTools = [
       }
       const nodeCounts = await repo.countNodesPerType();
       const edgeCounts = await repo.countEdgesPerType();
+      const allLabels = await repo.listLabels();
+      // Single-use labels are left out to keep the response small; new labels
+      // are checked against all of them on write anyway (see add_node).
       const result = {
         success: true,
         revision: s.revision,
         yaml: schema.toYaml(),
         node_counts: nodeCounts,
-        labels: await repo.listLabels()
+        labels: allLabels.filter((l) => l.count >= 2),
+        labels_total: allLabels.length
       };
 
       // Types present in the data but missing from the schema (written before

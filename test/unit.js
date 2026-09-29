@@ -4,7 +4,7 @@ import { GraphDatastore } from '../src/Datastore/GraphDatastore.js';
 import { ToolDefinitions } from '../src/Tools/ToolDefinitions.js';
 import { SchemaManager } from '../src/Schema/SchemaManager.js';
 import { SchemaTools } from '../src/Tools/SchemaTool.js';
-import { normalizeLabels } from '../src/Utils/Labels.js';
+import { normalizeLabels, isSimilarLabel } from '../src/Utils/Labels.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -489,8 +489,8 @@ async function testMerge() {
     merge_from: ['d1', 'd2']
   }, context);
   assert.equal(m.success, true);
-  assert.equal(m.node.properties.note, 'Embedded analytical database');
-  assert.equal(m.node.properties.version, '1.5', 'existing properties must be kept');
+  assert.deepEqual(m.node.properties, { note: 'Embedded analytical database' }, 'update_node echoes only changed properties');
+  assert.equal((await repo.getNode('k')).properties.version, '1.5', 'existing properties must be kept');
   assert.deepEqual(m.merge, {
     merged_ids: ['d1', 'd2'],
     redirected_edges: 2,
@@ -539,14 +539,32 @@ async function testVocabulary() {
   const u = await update_node({ id: 'c', labels: ' graph ' }, context);
   assert.equal(u.node.labels, 'graph');
 
-  console.log(' - get_schema returns node_counts + labels...');
+  console.log(' - get_schema returns node_counts + labels used twice or more...');
   const s = await get_schema({}, context);
   assert.deepEqual(s.node_counts, { note: 1, topic: 2 });
   assert.deepEqual(s.labels, [
     { label: 'ai', count: 2 },
-    { label: 'graph', count: 2 },
-    { label: 'memory', count: 1 }
+    { label: 'graph', count: 2 }
   ]);
+  assert.equal(s.labels_total, 3);
+
+  console.log(' - isSimilarLabel...');
+  const similar = [['fixes', 'fix'], ['fix', 'bugfix'], ['bugs', 'bugfix'], ['agent', 'agents'], ['code-review', 'review'],
+    ['findings', 'finding'], ['pavel-ines-cz', 'pavel-ines'], ['renaming', 'naming'], ['archtecture', 'architecture']];
+  for (const [a, b] of similar) assert.ok(isSimilarLabel(a, b), `${a} ~ ${b} expected similar`);
+  const different = [['schema', 'schema-parser'], ['encoder', 'decoder'], ['web', 'website-tools'], ['mcp', 'mcp-google-gemini'],
+    ['php', 'pdo'], ['ai', 'api']];
+  for (const [a, b] of different) assert.ok(!isSimilarLabel(a, b), `${a} ~ ${b} expected different`);
+
+  console.log(' - new labels similar to existing ones warn on write...');
+  const w1 = await add_node({ type: 'note', labels: 'graphs memory brand-new', properties: { title: 'W' } }, context);
+  assert.equal(w1.warnings.length, 1, 'only the similar new label warns (memory is known, brand-new has no match)');
+  assert.match(w1.warnings[0], /label "graphs" is new - similar existing: graph \(2\)/);
+  const w2 = await add_node({ type: 'note', labels: 'ai graph', properties: { title: 'W2' } }, context);
+  assert.equal(w2.warnings, undefined, 'known labels must not warn');
+  const w3 = await update_node({ id: 'c', labels: 'graph memorys' }, context);
+  assert.match(w3.warnings[0], /label "memorys" is new - similar existing: memory/);
+  assert.deepEqual(w3.node.properties, {}, 'labels-only update echoes no properties');
 
   context.dispose();
   console.log(' ✓ Labels + vocabulary OK');
