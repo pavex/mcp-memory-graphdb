@@ -119,6 +119,10 @@ A path containing `/` or `\` is always treated as a direct file location; anythi
 
 The schema file (`schema.yaml`, see below) always lives in the same directory as the database file.
 
+### Multiple sessions sharing one database
+
+Every Claude session starts its own server process, and DuckDB lets only one process hold a database file open at a time. The server therefore never keeps the file open: each tool call opens the database, runs as a single transaction and closes it again, which releases the file lock within a few tens of milliseconds. If another session holds the lock at that moment, the call waits and retries for up to 10 seconds before it returns a "database is busy" error. Schema changes made in one session are picked up by the others on their next tool call.
+
 ## How it works
 
 On first startup against a fresh database, the server:

@@ -1,6 +1,31 @@
 import { DuckDBInstance } from '@duckdb/node-api';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { InstallerDatastore } from './InstallerDatastore.js';
+
+// ---------------------------------------------------------------------------
+// Connection model
+//
+// DuckDB allows only one process to hold a database file open at a time.
+// Every Claude session spawns its own MCP server process, so keeping the file
+// open for the lifetime of the process locks out every other session.
+//
+// Instead, a file-backed datastore opens the database only for the duration
+// of one unit of work (withConnection / transaction) and closes the instance
+// right after, releasing the file lock. If another process currently holds
+// the lock, opening is retried with backoff until LOCK_TIMEOUT_MS.
+//
+// ':memory:' databases (tests) keep one persistent instance - closing it
+// would discard the data.
+// ---------------------------------------------------------------------------
+
+const LOCK_TIMEOUT_MS   = 10000;
+const LOCK_RETRY_MIN_MS = 20;
+const LOCK_RETRY_MAX_MS = 500;
+
+const isLockError = (e) => /being used by another process|could not set lock|conflicting lock|already open/i.test(e?.message ?? '');
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 
@@ -21,36 +46,136 @@ const parseRow = (row) => {
 export class GraphDatastore {
   constructor(dbPath) {
     this.dbPath = dbPath;
+    this.persistent = dbPath === ':memory:';
     this.instance = null;
     this.conn = null;
+    this.depth = 0;         // nesting level of withConnection()
+    this.inTransaction = false;
+    this.installed = false;
   }
 
   // --- Lifecycle ------------------------------------------------------------
 
+  // For a file database this only prepares the directory - the file itself is
+  // opened lazily per unit of work. For ':memory:' the instance stays open.
   async open() {
-    if (this.dbPath !== ':memory:') {
-      const dir = dirname(this.dbPath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
+    if (this.persistent) {
+      this.instance = await DuckDBInstance.create(this.dbPath);
+      this.conn = await this.instance.connect();
+      return;
     }
-    this.instance = await DuckDBInstance.create(this.dbPath);
-    this.conn = await this.instance.connect();
+    const dir = dirname(this.dbPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
   }
 
   close() {
-    this.conn.closeSync();
+    this._release();
+  }
+
+  // Run fn with an open connection. Nested calls reuse the outer connection,
+  // so a whole tool call touches the file exactly once.
+  async withConnection(fn) {
+    if (this.conn && (this.persistent || this.depth > 0)) {
+      this.depth++;
+      try {
+        return await fn();
+      } finally {
+        this.depth--;
+      }
+    }
+
+    await this._acquire();
+    this.depth++;
+    try {
+      if (!this.installed) {
+        await new InstallerDatastore().install(this.conn);
+        this.installed = true;
+      }
+      return await fn();
+    } finally {
+      this.depth--;
+      if (this.depth === 0 && !this.persistent) {
+        this._release();
+      }
+    }
+  }
+
+  // Run fn inside a single transaction - all changes commit together or not
+  // at all. Nested calls join the outer transaction.
+  async transaction(fn) {
+    return this.withConnection(async () => {
+      if (this.inTransaction) {
+        return fn();
+      }
+      await this.conn.run('BEGIN TRANSACTION');
+      this.inTransaction = true;
+      try {
+        const result = await fn();
+        await this.conn.run('COMMIT');
+        return result;
+      } catch (e) {
+        await this.conn.run('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        this.inTransaction = false;
+      }
+    });
+  }
+
+  async _acquire() {
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    let delay = LOCK_RETRY_MIN_MS;
+
+    for (;;) {
+      try {
+        this.instance = await DuckDBInstance.create(this.dbPath);
+        this.conn = await this.instance.connect();
+        return;
+      } catch (e) {
+        this._release();
+        if (!isLockError(e) || Date.now() + delay > deadline) {
+          if (isLockError(e)) {
+            throw new Error(
+              `Memory database is busy - another session kept it locked for more than ${LOCK_TIMEOUT_MS / 1000}s. ` +
+              `Try again in a moment. (${this.dbPath})`
+            );
+          }
+          throw e;
+        }
+        await sleep(delay + Math.random() * delay);
+        delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
+      }
+    }
+  }
+
+  _release() {
+    try {
+      this.conn?.closeSync();
+    } catch {
+      // already closed
+    }
+    try {
+      this.instance?.closeSync();
+    } catch {
+      // already closed
+    }
+    this.conn = null;
+    this.instance = null;
   }
 
   // --- Helpers ----------------------------------------------------------------
 
   async _run(sql, params = []) {
-    return this.conn.run(sql, params);
+    return this.withConnection(() => this.conn.run(sql, params));
   }
 
   async _all(sql, params = []) {
-    const reader = await this.conn.runAndReadAll(sql, params);
-    return reader.getRowObjects().map(parseRow);
+    return this.withConnection(async () => {
+      const reader = await this.conn.runAndReadAll(sql, params);
+      return reader.getRowObjects().map(parseRow);
+    });
   }
 
   async _get(sql, params = []) {
@@ -96,11 +221,13 @@ export class GraphDatastore {
   }
 
   async deleteNode(id) {
-    await this._run(
-      `DELETE FROM edges WHERE source_id = $1 OR target_id = $1`,
-      [id]
-    );
-    await this._run(`DELETE FROM nodes WHERE id = $1`, [id]);
+    await this.transaction(async () => {
+      await this._run(
+        `DELETE FROM edges WHERE source_id = $1 OR target_id = $1`,
+        [id]
+      );
+      await this._run(`DELETE FROM nodes WHERE id = $1`, [id]);
+    });
   }
 
   async getNode(id) {

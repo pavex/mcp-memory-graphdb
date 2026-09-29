@@ -24,6 +24,7 @@ export class SchemaManager {
     this.schemaPath = join(dirname(dbPath), 'schema.yaml');
     this.repo = repo; // GraphDatastore - needed for migrations
     this.schema = null;
+    this.raw = null; // last schema.yaml content seen, for reload()
   }
 
   exists() {
@@ -33,6 +34,23 @@ export class SchemaManager {
   load() {
     const raw = readFileSync(this.schemaPath, 'utf8');
     this.schema = load(raw);
+    this.raw = raw;
+    return this.schema;
+  }
+
+  // Another MCP server process (another session) may have applied a schema
+  // change since we last looked - re-read schema.yaml if its content differs.
+  // Callers run this while holding the database lock, so the check-then-apply
+  // sequence is serialized across processes.
+  reload() {
+    if (!this.exists()) {
+      return this.schema;
+    }
+    const raw = readFileSync(this.schemaPath, 'utf8');
+    if (raw !== this.raw) {
+      this.schema = load(raw);
+      this.raw = raw;
+    }
     return this.schema;
   }
 
@@ -40,6 +58,7 @@ export class SchemaManager {
     const yaml = dump(schema, { lineWidth: 120, quotingType: '"' });
     writeFileSync(this.schemaPath, yaml, 'utf8');
     this.schema = schema;
+    this.raw = yaml;
   }
 
   toYaml() {

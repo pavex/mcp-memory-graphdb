@@ -6,7 +6,6 @@ import { CallToolRequestSchema,
          ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { zodToJsonSchema }        from 'zod-to-json-schema';
 import { z }                      from 'zod';
-import { InstallerDatastore }     from './Datastore/InstallerDatastore.js';
 import { GraphDatastore }         from './Datastore/GraphDatastore.js';
 import { SchemaManager }          from './Schema/SchemaManager.js';
 import { ToolDefinitions }        from './Tools/ToolDefinitions.js';
@@ -15,10 +14,11 @@ import { buildOnboardingPrompt }  from './Prompts/OnboardingPrompt.js';
 import { Config }                 from './Config.js';
 
 // --- Bootstrap ---------------------------------------------------------------
+// The database file is NOT held open here - GraphDatastore opens it per tool
+// call, so several sessions (processes) can share one memory file.
 
 const repo = new GraphDatastore(Config.DB_PATH);
 await repo.open();
-await new InstallerDatastore().install(repo.conn);
 
 const schema = new SchemaManager(Config.DB_PATH, repo);
 if (!schema.exists()) {
@@ -55,12 +55,15 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({
 
 server.setRequestHandler(GetPromptRequestSchema, async (req) => {
   if (req.params.name === 'setup') {
+    schema.reload();
     return buildOnboardingPrompt(schema);
   }
   throw new Error(`Unknown prompt: ${req.params.name}`);
 });
 
 // Mutex -- DuckDB connection is not safe for concurrent async operations.
+// Across processes, the DuckDB file lock taken by repo.transaction() does the
+// same job; each tool call is one transaction (all-or-nothing).
 let queue = Promise.resolve();
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -76,7 +79,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   const result = await (queue = queue.then(async () => {
     try {
-      const data = await handler(args, context);
+      const data = await repo.transaction(() => {
+        schema.reload();
+        return handler(args, context);
+      });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     } catch (e) {
       const message = e instanceof z.ZodError
