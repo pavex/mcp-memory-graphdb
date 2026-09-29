@@ -32,6 +32,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TS  = `strftime(created_at::TIMESTAMP, '%Y-%m-%dT%H:%M:%SZ')`;
 const TSU = `strftime(updated_at::TIMESTAMP, '%Y-%m-%dT%H:%M:%SZ')`;
 
+// Node name/title, lowercased, with whitespace, '-', '_' and '.' removed -
+// cheap key for spotting duplicates like "DuckDB" / "duck-db" / "Duck DB".
+const NORM_NAME = `lower(regexp_replace(coalesce(json_extract_string(properties, '$.name'), json_extract_string(properties, '$.title'), ''), '[\\s_.-]+', '', 'g'))`;
+
 const parseRow = (row) => {
   if (row && typeof row.properties === 'string') {
     try {
@@ -230,6 +234,73 @@ export class GraphDatastore {
     });
   }
 
+  // Merge duplicate nodes into keepId: redirect their edges onto keepId, drop
+  // edges that become self-loops or exact duplicates (same type, source and
+  // target) of an existing edge, then delete the merged nodes. Only edges that
+  // were actually redirected are ever dropped. The caller composes the kept
+  // node's properties - this is purely the mechanical part.
+  async mergeNodes(keepId, mergeIds) {
+    return this.transaction(async () => {
+      const ph = mergeIds.map((_, i) => `$${i + 2}`).join(', '); // $1 = keepId
+      const params = [keepId, ...mergeIds];
+      const idsPh = mergeIds.map((_, i) => `$${i + 1}`).join(', ');
+
+      const moved = await this._all(
+        `SELECT id FROM edges WHERE source_id IN (${idsPh}) OR target_id IN (${idsPh})`,
+        mergeIds
+      );
+      await this._run(`UPDATE edges SET source_id = $1 WHERE source_id IN (${ph})`, params);
+      await this._run(`UPDATE edges SET target_id = $1 WHERE target_id IN (${ph})`, params);
+
+      let droppedSelfLoops = 0;
+      let droppedDuplicates = 0;
+
+      if (moved.length) {
+        const movedIds = moved.map((r) => r.id);
+        const mph = movedIds.map((_, i) => `$${i + 1}`).join(', ');
+
+        const loops = await this._all(
+          `SELECT id FROM edges WHERE id IN (${mph}) AND source_id = target_id`,
+          movedIds
+        );
+        if (loops.length) {
+          await this._run(`DELETE FROM edges WHERE id IN (${loops.map((_, i) => `$${i + 1}`).join(', ')})`, loops.map((r) => r.id));
+        }
+        droppedSelfLoops = loops.length;
+
+        // A redirected edge is a duplicate if another edge with the same
+        // (type, source, target) exists that is either not redirected, or
+        // redirected but older - so exactly one copy survives.
+        const dups = await this._all(
+          `SELECT e.id
+           FROM   edges e
+           WHERE  e.id IN (${mph})
+             AND  EXISTS (
+                    SELECT 1 FROM edges o
+                    WHERE  o.id <> e.id
+                      AND  o.type = e.type AND o.source_id = e.source_id AND o.target_id = e.target_id
+                      AND  (o.id NOT IN (${mph}) OR o.created_at < e.created_at
+                            OR (o.created_at = e.created_at AND o.id < e.id))
+                  )`,
+          movedIds
+        );
+        if (dups.length) {
+          await this._run(`DELETE FROM edges WHERE id IN (${dups.map((_, i) => `$${i + 1}`).join(', ')})`, dups.map((r) => r.id));
+        }
+        droppedDuplicates = dups.length;
+      }
+
+      await this._run(`DELETE FROM nodes WHERE id IN (${idsPh})`, mergeIds);
+
+      return {
+        merged_ids: mergeIds,
+        redirected_edges: moved.length - droppedSelfLoops - droppedDuplicates,
+        dropped_duplicate_edges: droppedDuplicates,
+        dropped_self_loops: droppedSelfLoops
+      };
+    });
+  }
+
   async getNode(id) {
     return this._get(
       `SELECT id, type, labels, properties,
@@ -356,16 +427,37 @@ export class GraphDatastore {
     return Number(row?.n ?? 0);
   }
 
+  // Ordered by type, then normalized name, so likely duplicates ("DuckDB",
+  // "duckdb", "Duck DB") land next to each other in the same batch.
   async dreamingPage(limit, offset) {
     return this._all(
       `SELECT id, type, labels, properties,
               ${TS}  AS created_at,
               ${TSU} AS updated_at
        FROM   nodes
-       ORDER  BY type, created_at
+       ORDER  BY type, ${NORM_NAME}, created_at, id
        LIMIT  $1 OFFSET $2`,
       [parseInt(limit, 10), parseInt(offset, 10)]
     );
+  }
+
+  // For each given node id: other nodes of the same type with the same
+  // normalized name/title. Returns { id: [duplicate ids] } for hits only.
+  async findPossibleDuplicates(ids) {
+    if (!ids.length) {
+      return {};
+    }
+    const ph = ids.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await this._all(
+      `WITH n AS (SELECT id, type, ${NORM_NAME} AS k FROM nodes)
+       SELECT a.id, list(b.id ORDER BY b.id) AS dup_ids
+       FROM   n a
+       JOIN   n b ON b.type = a.type AND b.k = a.k AND b.id <> a.id
+       WHERE  a.id IN (${ph}) AND a.k <> ''
+       GROUP  BY a.id`,
+      ids
+    );
+    return Object.fromEntries(rows.map((r) => [r.id, [...r.dup_ids.items]]));
   }
 
   // Returns up to `cap` outgoing + `cap` incoming edges for a node, each

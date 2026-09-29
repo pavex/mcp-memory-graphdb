@@ -138,7 +138,7 @@ From then on, every conversation that connects to this server can read and write
 | Tool | Purpose |
 |---|---|
 | `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels`, and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
-| `update_node` | Merge new properties and/or replace labels on an existing node. |
+| `update_node` | Merge new properties and/or replace labels on an existing node. With `merge_from`, merge duplicate nodes into it (see [Dreaming](#dreaming--guided-cleanup)). |
 | `delete_node` | Delete a node. Any edges touching it are deleted automatically. |
 | `get_node` | Fetch a single node by ID. |
 | `add_edge` | Create a directed, typed edge between two existing nodes. The type must exist in the schema; both nodes must exist. |
@@ -211,9 +211,11 @@ The `apply_schema` tool's own description carries this same guidance, and the bu
 
 Over time, any memory accumulates small problems: a node added twice under slightly different IDs, two relationships that should exist but were never written down. The `dreaming` tool exists to walk through the graph and fix exactly that — not automatically, but with an agent doing the reviewing.
 
-Calling `dreaming` returns a batch of up to 10 nodes, ordered so that nodes of the same type sit next to each other (which makes duplicates easy to spot side by side), along with a capped 1-hop view of each node's edges — what it connects to, and what connects to it. If a node has more edges than the cap, the response says how many more exist (`out_more` / `in_more`) without flooding the batch with all of them. The response also carries `total`, `has_more` and `next_offset`, so an agent can walk the entire graph one batch at a time by feeding `next_offset` back in.
+Calling `dreaming` returns a batch of up to 10 nodes, ordered by type and then by normalized name (so "DuckDB", "duck-db" and "Duck DB" sit next to each other), along with a capped 1-hop view of each node's edges — what it connects to, and what connects to it. If a node has more edges than the cap, the response says how many more exist (`out_more` / `in_more`) without flooding the batch with all of them. The response also carries `total`, `has_more` and `next_offset`, so an agent can walk the entire graph one batch at a time by feeding `next_offset` back in.
 
-The tool itself makes no decisions and changes nothing — it only surfaces data and a set of instructions. All actual changes happen through the ordinary tools: redirecting a duplicate node's edges with `add_edge` and `delete_edge`, then removing it with `delete_node`; or adding a relationship that was missing with `add_edge`. If a duplicate spans an entire node *type* — say a schema revision introduced `tool` as a better name for what used to be `technology` — that's a job for `apply_schema`'s migration support instead (see [Renaming a type](#renaming-a-type)), not for `dreaming` directly.
+A node whose normalized name matches another node of the same type — anywhere in the graph, not only in the current batch — carries a `possible_duplicates` list of their IDs. It is only a hint; the agent still decides.
+
+The tool itself makes no decisions and changes nothing — it only surfaces data and a set of instructions. Merging is split between the agent and the server. The agent reads the duplicates and composes the merged properties itself, reconciling and extracting the information rather than concatenating text. It then calls `update_node({ id, properties, merge_from: [duplicate ids] })`. The server does the mechanical part in one transaction: it redirects every edge of the duplicates onto the kept node, drops edges that would become exact duplicates or self-loops, and deletes the duplicates. A missing relationship is added with `add_edge`. If a duplicate spans an entire node *type* — say a schema revision introduced `tool` as a better name for what used to be `technology` — that's a job for `apply_schema`'s migration support instead (see [Renaming a type](#renaming-a-type)), not for `dreaming` directly.
 
 A typical pass looks like:
 
@@ -296,7 +298,6 @@ or simply run `mcpb.cmd` / `mcpb.sh`, which do the full install → build → pa
 This is **Phase 2** of the project — graph CRUD, a fully deterministic and validated schema system, and a guided dreaming/cleanup workflow. Open for the future:
 
 - Full-text search via DuckDB's FTS extension (current `search` uses a simple `ILIKE`).
-- A dedicated `merge_nodes` tool, if redirecting edges manually during dreaming proves too tedious in practice.
 
 ## Compatibility
 

@@ -432,6 +432,81 @@ async function testDreaming() {
   console.log(' ✓ DreamingTool OK');
 }
 
+// ---------------------------------------------------------------------------
+// Test: merging duplicates — dreaming hints + update_node(merge_from)
+// ---------------------------------------------------------------------------
+
+async function testMerge() {
+  console.log('--- Merge (update_node merge_from) ---');
+
+  const context  = await makeContext();
+  const { repo } = context;
+  const handlers = new Map(ToolDefinitions.map(t => [t.name, t.handler]));
+  const add_node    = handlers.get('add_node');
+  const add_edge    = handlers.get('add_edge');
+  const update_node = handlers.get('update_node');
+  const dreaming    = handlers.get('dreaming');
+
+  await add_node({ id: 'k',  type: 'technology', properties: { name: 'DuckDB', version: '1.5' } }, context);
+  await add_node({ id: 'd1', type: 'technology', properties: { name: 'duck-db', note: 'embedded' } }, context);
+  await add_node({ id: 'd2', type: 'technology', properties: { name: 'Duck DB' } }, context);
+  await add_node({ id: 'x',  type: 'project',    properties: { name: 'Memory' } }, context);
+  await add_node({ id: 'y',  type: 'person',     properties: { name: 'Pavel' } }, context);
+  await add_node({ id: 'z',  type: 'person',     properties: { name: 'Other' } }, context);
+
+  await add_edge({ source_id: 'x',  target_id: 'k',  type: 'uses' }, context);
+  await add_edge({ source_id: 'x',  target_id: 'd1', type: 'uses' }, context);       // → duplicate of x-uses-k
+  await add_edge({ source_id: 'y',  target_id: 'd1', type: 'knows' }, context);      // → redirected
+  await add_edge({ source_id: 'd1', target_id: 'k',  type: 'relates_to' }, context); // → self-loop
+  await add_edge({ source_id: 'd2', target_id: 'd1', type: 'relates_to' }, context); // → self-loop
+  await add_edge({ source_id: 'd2', target_id: 'x',  type: 'part_of' }, context);    // → redirected
+
+  // dreaming — name-normalized duplicates are adjacent and hinted
+  console.log(' - dreaming (possible_duplicates + name ordering)...');
+  const page = await dreaming({ limit: 10 }, context);
+  const techIds = page.nodes.filter(n => n.type === 'technology').map(n => n.id);
+  assert.equal(techIds.length, 3);
+  const byId = Object.fromEntries(page.nodes.map(n => [n.id, n]));
+  assert.deepEqual(byId.k.possible_duplicates, ['d1', 'd2']);
+  assert.deepEqual(byId.d1.possible_duplicates, ['d2', 'k']);
+  assert.equal(byId.y.possible_duplicates, undefined, 'different names must not be hinted');
+  assert.equal(byId.x.possible_duplicates, undefined);
+  assert.ok(page.instructions.includes('merge_from'), 'dreaming must explain merge_from');
+
+  // update_node merge_from — guards
+  console.log(' - update_node merge_from (guards)...');
+  await assert.rejects(() => update_node({ id: 'k', merge_from: ['k'] }, context), /must not contain the kept node/);
+  await assert.rejects(() => update_node({ id: 'k', merge_from: ['nope'] }, context), /Node not found \(merge_from\): nope/);
+  await assert.rejects(() => update_node({ id: 'nope', merge_from: ['d1'] }, context), /Node not found: nope/);
+
+  // update_node merge_from — the merge itself
+  console.log(' - update_node merge_from (merge)...');
+  const m = await update_node({
+    id: 'k',
+    properties: { note: 'Embedded analytical database' },
+    merge_from: ['d1', 'd2']
+  }, context);
+  assert.equal(m.success, true);
+  assert.equal(m.node.properties.note, 'Embedded analytical database');
+  assert.equal(m.node.properties.version, '1.5', 'existing properties must be kept');
+  assert.deepEqual(m.merge, {
+    merged_ids: ['d1', 'd2'],
+    redirected_edges: 2,
+    dropped_duplicate_edges: 1,
+    dropped_self_loops: 2
+  });
+
+  assert.equal(await repo.getNode('d1'), null, 'merged node d1 must be deleted');
+  assert.equal(await repo.getNode('d2'), null, 'merged node d2 must be deleted');
+
+  const edges = (await repo.listEdges({ limit: 100 }))
+    .map(e => `${e.source_id}-${e.type}-${e.target_id}`)
+    .sort();
+  assert.deepEqual(edges, ['k-part_of-x', 'x-uses-k', 'y-knows-k']);
+
+  context.dispose();
+  console.log(' ✓ Merge OK');
+}
 
 async function run() {
   console.log('Starting tests...\n');
@@ -439,6 +514,7 @@ async function run() {
   await testDatastore();
   await testSchema();
   await testDreaming();
+  await testMerge();
   console.log('\nAll tests passed!');
 }
 

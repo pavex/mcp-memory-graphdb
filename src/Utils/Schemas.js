@@ -11,10 +11,12 @@ export const Schemas = {
   update_node: z.object({
     id: z.string().min(1),
     labels: z.string().optional(),
-    properties: z.record(z.unknown()).optional()
+    properties: z.record(z.unknown()).optional(),
+    merge_from: z.array(z.string().min(1)).min(1).optional()
+      .describe('IDs of duplicate nodes to merge into this one: their edges are redirected here and they are deleted. Send the merged properties you composed from all of them in the same call.')
   }).refine(
-    (d) => d.labels !== undefined || d.properties !== undefined,
-    { message: 'Provide at least one of: labels, properties.' }
+    (d) => d.labels !== undefined || d.properties !== undefined || d.merge_from !== undefined,
+    { message: 'Provide at least one of: labels, properties, merge_from.' }
   ),
 
   delete_node: z.object({

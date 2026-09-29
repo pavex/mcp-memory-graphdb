@@ -19,14 +19,34 @@ export const NodeTools = [
   },
   {
     name: 'update_node',
-    description: 'Update labels and/or properties of an existing node. Properties are merged into existing ones.',
+    description: 'Update labels and/or properties of an existing node. Properties are merged into existing ones. With merge_from, duplicate nodes are merged into this one (see dreaming for the workflow).',
     inputSchema: Schemas.update_node,
     handler: async (args, { repo, schema }) => {
-      const node = await repo.updateNode(args);
-      if (!node) {
+      const existing = await repo.getNode(args.id);
+      if (!existing) {
         throw new Error(`Node not found: ${args.id}`);
       }
-      return withWarnings({ success: true, node }, schema.propertyWarnings(node.type, args.properties));
+
+      const mergeIds = [...new Set(args.merge_from ?? [])];
+      if (mergeIds.includes(args.id)) {
+        throw new Error(`merge_from must not contain the kept node itself: ${args.id}`);
+      }
+      for (const id of mergeIds) {
+        if (!await repo.getNode(id)) {
+          throw new Error(`Node not found (merge_from): ${id}`);
+        }
+      }
+
+      let node = existing;
+      if (args.labels !== undefined || args.properties !== undefined) {
+        node = await repo.updateNode(args);
+      }
+
+      const result = { success: true, node };
+      if (mergeIds.length) {
+        result.merge = await repo.mergeNodes(args.id, mergeIds);
+      }
+      return withWarnings(result, schema.propertyWarnings(node.type, args.properties));
     }
   },
   {

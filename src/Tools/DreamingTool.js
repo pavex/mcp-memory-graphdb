@@ -3,13 +3,13 @@ import { Schemas } from '../Utils/Schemas.js';
 // ---------------------------------------------------------------------------
 // dreaming - guided graph review and cleanup.
 //
-// Returns a batch of nodes (ordered type, created_at - same types sit next
-// to each other, making duplicates easy to spot side by side) plus a capped
-// 1-hop view of each node's edges. The server makes no decisions and changes
-// nothing by itself; this tool only surfaces data and instructions. All
-// actual changes happen through the normal node/edge tools (add_node,
-// update_node, delete_node, add_edge, delete_edge) and, where a type itself
-// needs renaming/removal as part of cleanup, through apply_schema.
+// Returns a batch of nodes (ordered type, normalized name - likely duplicates
+// sit next to each other) plus a capped 1-hop view of each node's edges, and
+// a possible_duplicates hint on nodes whose same-type name matches another
+// node. The server makes no decisions and changes nothing by itself; this
+// tool only surfaces data and instructions. Merging happens through
+// update_node(merge_from), other changes through the normal node/edge tools
+// and, where a type itself needs renaming/removal, through apply_schema.
 // ---------------------------------------------------------------------------
 
 export const DreamingTool = {
@@ -17,7 +17,7 @@ export const DreamingTool = {
   description: [
     'Get a batch of nodes (with their immediate edges) for memory cleanup and reorganization.',
     'Use this to find and merge duplicate nodes, and to spot relationships that should exist but do not.',
-    'Returns nodes ordered by type so similar entries sit next to each other.',
+    'Returns nodes ordered by type and name so similar entries sit next to each other; nodes whose name matches another node of the same type carry possible_duplicates.',
     'Call again with the returned next_offset to continue through the whole graph.'
   ].join(' '),
   inputSchema: Schemas.dreaming,
@@ -27,10 +27,16 @@ export const DreamingTool = {
     const total = await repo.countAllNodes();
     const nodes = await repo.dreamingPage(d.limit, d.offset);
 
+    const duplicates = await repo.findPossibleDuplicates(nodes.map((n) => n.id));
+
     const enriched = [];
     for (const node of nodes) {
       const edges = await repo.getNeighborEdges(node.id, d.edge_cap);
-      enriched.push({ ...node, edges });
+      const item = { ...node, edges };
+      if (duplicates[node.id]) {
+        item.possible_duplicates = duplicates[node.id];
+      }
+      enriched.push(item);
     }
 
     const seenSoFar = d.offset + nodes.length;
@@ -42,16 +48,22 @@ export const DreamingTool = {
       : 'This was the last batch - dreaming pass complete.';
 
     const duplicatesNote = [
-      `If two nodes clearly represent the same thing (same identity, overlapping properties), pick one to keep.`,
-      `Move its missing properties over with update_node, redirect the other node's edges onto the kept node`,
-      `with add_edge, then delete_edge the old edges and delete_node the duplicate.`
+      `Check nodes with possible_duplicates first (same type, same normalized name - may live outside this batch,`,
+      `get_node them), but also look for duplicates the name match cannot see (different spelling, alias, abbreviation).`,
+      `If nodes clearly represent the same thing, pick one to keep and read all of them. Compose the merged properties`,
+      `yourself: extract and reconcile the information (keep the more precise/recent value, combine complementary facts`,
+      `into coherent text) - do not just concatenate. Then call`,
+      `update_node({ id: <kept>, properties: <merged>, labels: <merged>, merge_from: [<duplicate ids>] }).`,
+      `The server redirects all edges of the duplicates onto the kept node, drops edges that would become exact`,
+      `duplicates or self-loops, and deletes the duplicates - all in one transaction.`,
+      `properties are merged into the kept node's existing ones, so send every key whose value should change.`
     ].join(' ');
 
     const edgesFieldNote = [
       `Each node's "edges" field lists up to the edge_cap most recent edges in each direction as`,
       `{ direction, type, other_id, other_type }, plus out_more / in_more counts if there are more beyond`,
-      `the cap. A high out_more/in_more on a node you are about to delete is a sign to double-check nothing`,
-      `important gets silently dropped - redirect those edges first.`
+      `the cap. Edges beyond the cap are still redirected by merge_from; before a plain delete_node, check`,
+      `out_more/in_more so nothing important gets silently dropped.`
     ].join(' ');
 
     const instructions = [
@@ -64,7 +76,7 @@ export const DreamingTool = {
       '',
       edgesFieldNote,
       '',
-      'Be conservative: when unsure whether two nodes are really duplicates, leave them as-is rather than merging incorrectly. Merging is one-way in practice - only delete a node once its edges have been safely redirected.'
+      'Be conservative: when unsure whether two nodes are really duplicates, leave them as-is rather than merging incorrectly - a merge cannot be undone. A name match alone is only a hint.'
     ].join('\n');
 
     return {
