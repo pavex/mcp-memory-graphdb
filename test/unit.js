@@ -104,6 +104,17 @@ async function testDatastore() {
   const r6 = await add_edge({ id: 'e-lives', source_id: 'alice', target_id: bobId, type: 'colleague' }, context);
   assert.equal(r6.edge.id, 'e-lives');
 
+  // add_edge — both endpoints must exist
+  console.log(' - add_edge (missing endpoint rejected)...');
+  await assert.rejects(
+    () => add_edge({ source_id: 'alice', target_id: 'nobody', type: 'knows' }, context),
+    /Node not found \(target_id\): nobody/
+  );
+  await assert.rejects(
+    () => add_edge({ source_id: 'nobody', target_id: 'alice', type: 'knows' }, context),
+    /Node not found \(source_id\): nobody/
+  );
+
   // list_edges — all
   console.log(' - list_edges (all)...');
   const r7 = await list_edges({}, context);

@@ -3,10 +3,15 @@ import { Schemas } from '../Utils/Schemas.js';
 export const EdgeTools = [
   {
     name: 'add_edge',
-    description: 'Add a directed edge between two nodes. Returns the created edge.',
+    description: 'Add a directed edge between two existing nodes. Returns the created edge.',
     inputSchema: Schemas.add_edge,
     handler: async (args, { repo }) => {
       const data = { properties: {}, ...args };
+      for (const [field, id] of [['source_id', data.source_id], ['target_id', data.target_id]]) {
+        if (!await repo.getNode(id)) {
+          throw new Error(`Node not found (${field}): ${id}`);
+        }
+      }
       const edge = await repo.addEdge(data);
       return { success: true, edge };
     }
