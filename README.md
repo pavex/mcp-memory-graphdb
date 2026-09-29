@@ -137,7 +137,7 @@ From then on, every conversation that connects to this server can read and write
 
 | Tool | Purpose |
 |---|---|
-| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels` (comma-separated string or array; trimmed and de-duplicated on write), and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
+| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels` (space-separated string or array; normalized and de-duplicated on write), and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
 | `update_node` | Merge new properties and/or replace labels on an existing node. With `merge_from`, merge duplicate nodes into it (see [Dreaming](#dreaming--guided-cleanup)). |
 | `delete_node` | Delete a node. Any edges touching it are deleted automatically. |
 | `get_node` | Fetch a single node by ID. |

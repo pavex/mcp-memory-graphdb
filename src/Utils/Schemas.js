@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const Labels = z.union([z.string(), z.array(z.string())])
-  .describe('Comma-separated labels ("ai,duckdb") or an array. Reuse existing labels listed by get_schema.');
+  .describe('Space-separated labels ("ai duckdb schema-parser") or an array. Reuse existing labels listed by get_schema.');
 
 export const Schemas = {
   add_node: z.object({

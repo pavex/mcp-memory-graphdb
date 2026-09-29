@@ -393,9 +393,9 @@ export class GraphDatastore {
 
   async listLabels() {
     const rows = await this._all(
-      `SELECT trim(l) AS label, count(*) AS n
-       FROM   nodes, unnest(string_split(labels, ',')) AS t(l)
-       WHERE  trim(l) <> ''
+      `SELECT l AS label, count(*) AS n
+       FROM   nodes, unnest(regexp_split_to_array(labels, '[\\s,]+')) AS t(l)
+       WHERE  l <> ''
        GROUP  BY 1
        ORDER  BY n DESC, label`
     );

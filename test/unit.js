@@ -518,8 +518,9 @@ async function testVocabulary() {
   console.log('--- Labels + get_schema vocabulary ---');
 
   console.log(' - normalizeLabels...');
-  assert.equal(normalizeLabels(' ai, DuckDB ,,ai , AI,memory '), 'ai,DuckDB,memory');
-  assert.equal(normalizeLabels(['x', ' y ', '', 'X']), 'x,y');
+  assert.equal(normalizeLabels(' ai, DuckDB ,,ai , AI,memory '), 'ai DuckDB memory');
+  assert.equal(normalizeLabels('reabr  schema3\tfix reabr'), 'reabr schema3 fix');
+  assert.equal(normalizeLabels(['x', ' y ', '', 'X', 'two words']), 'x y two-words');
   assert.equal(normalizeLabels(''), '');
   assert.equal(normalizeLabels(undefined), '');
 
@@ -531,9 +532,9 @@ async function testVocabulary() {
 
   console.log(' - labels normalized on write...');
   const a = await add_node({ id: 'a', type: 'topic', labels: 'ai, memory ,ai', properties: { name: 'A' } }, context);
-  assert.equal(a.node.labels, 'ai,memory');
+  assert.equal(a.node.labels, 'ai memory');
   const b = await add_node({ id: 'b', type: 'topic', labels: ['ai', 'graph'], properties: { name: 'B' } }, context);
-  assert.equal(b.node.labels, 'ai,graph');
+  assert.equal(b.node.labels, 'ai graph');
   await add_node({ id: 'c', type: 'note', properties: { title: 'C' } }, context);
   const u = await update_node({ id: 'c', labels: ' graph ' }, context);
   assert.equal(u.node.labels, 'graph');
