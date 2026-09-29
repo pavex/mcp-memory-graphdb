@@ -1,16 +1,19 @@
 import { z } from 'zod';
 
+const Labels = z.union([z.string(), z.array(z.string())])
+  .describe('Comma-separated labels ("ai,duckdb") or an array. Reuse existing labels listed by get_schema.');
+
 export const Schemas = {
   add_node: z.object({
     id: z.string().optional(),
     type: z.string().min(1, 'type must not be empty'),
-    labels: z.string().default(''),
+    labels: Labels.default(''),
     properties: z.record(z.unknown()).default({})
   }),
 
   update_node: z.object({
     id: z.string().min(1),
-    labels: z.string().optional(),
+    labels: Labels.optional(),
     properties: z.record(z.unknown()).optional(),
     merge_from: z.array(z.string().min(1)).min(1).optional()
       .describe('IDs of duplicate nodes to merge into this one: their edges are redirected here and they are deleted. Send the merged properties you composed from all of them in the same call.')

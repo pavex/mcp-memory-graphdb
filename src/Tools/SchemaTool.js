@@ -4,9 +4,9 @@ import { Schemas } from '../Utils/Schemas.js';
 export const SchemaTools = [
   {
     name: 'get_schema',
-    description: 'Return the current schema as YAML string including revision number, node types and edge types. Always call this before apply_schema to see the exact current state.',
+    description: 'Return the current schema as YAML string including revision number, node types and edge types, plus the vocabulary in use: node counts per type and all labels with their counts (reuse existing labels instead of inventing variants). Always call this before apply_schema to see the exact current state.',
     inputSchema: Schemas.get_schema,
-    handler: async (_args, { schema }) => {
+    handler: async (_args, { schema, repo }) => {
       const s = schema.get();
       if (!s) {
         throw new Error('Schema not loaded.');
@@ -14,7 +14,9 @@ export const SchemaTools = [
       return {
         success: true,
         revision: s.revision,
-        yaml: schema.toYaml()
+        yaml: schema.toYaml(),
+        node_counts: await repo.countNodesPerType(),
+        labels: await repo.listLabels()
       };
     }
   },

@@ -3,6 +3,8 @@ import { InstallerDatastore } from '../src/Datastore/InstallerDatastore.js';
 import { GraphDatastore } from '../src/Datastore/GraphDatastore.js';
 import { ToolDefinitions } from '../src/Tools/ToolDefinitions.js';
 import { SchemaManager } from '../src/Schema/SchemaManager.js';
+import { SchemaTools } from '../src/Tools/SchemaTool.js';
+import { normalizeLabels } from '../src/Utils/Labels.js';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -508,6 +510,47 @@ async function testMerge() {
   console.log(' ✓ Merge OK');
 }
 
+// ---------------------------------------------------------------------------
+// Test: labels normalization + vocabulary in get_schema
+// ---------------------------------------------------------------------------
+
+async function testVocabulary() {
+  console.log('--- Labels + get_schema vocabulary ---');
+
+  console.log(' - normalizeLabels...');
+  assert.equal(normalizeLabels(' ai, DuckDB ,,ai , AI,memory '), 'ai,DuckDB,memory');
+  assert.equal(normalizeLabels(['x', ' y ', '', 'X']), 'x,y');
+  assert.equal(normalizeLabels(''), '');
+  assert.equal(normalizeLabels(undefined), '');
+
+  const context  = await makeContext();
+  const handlers = new Map([...ToolDefinitions, ...SchemaTools].map(t => [t.name, t.handler]));
+  const add_node    = handlers.get('add_node');
+  const update_node = handlers.get('update_node');
+  const get_schema  = handlers.get('get_schema');
+
+  console.log(' - labels normalized on write...');
+  const a = await add_node({ id: 'a', type: 'topic', labels: 'ai, memory ,ai', properties: { name: 'A' } }, context);
+  assert.equal(a.node.labels, 'ai,memory');
+  const b = await add_node({ id: 'b', type: 'topic', labels: ['ai', 'graph'], properties: { name: 'B' } }, context);
+  assert.equal(b.node.labels, 'ai,graph');
+  await add_node({ id: 'c', type: 'note', properties: { title: 'C' } }, context);
+  const u = await update_node({ id: 'c', labels: ' graph ' }, context);
+  assert.equal(u.node.labels, 'graph');
+
+  console.log(' - get_schema returns node_counts + labels...');
+  const s = await get_schema({}, context);
+  assert.deepEqual(s.node_counts, { note: 1, topic: 2 });
+  assert.deepEqual(s.labels, [
+    { label: 'ai', count: 2 },
+    { label: 'graph', count: 2 },
+    { label: 'memory', count: 1 }
+  ]);
+
+  context.dispose();
+  console.log(' ✓ Labels + vocabulary OK');
+}
+
 async function run() {
   console.log('Starting tests...\n');
   await testInstaller();
@@ -515,6 +558,7 @@ async function run() {
   await testSchema();
   await testDreaming();
   await testMerge();
+  await testVocabulary();
   console.log('\nAll tests passed!');
 }
 

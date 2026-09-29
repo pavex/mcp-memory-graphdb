@@ -2,6 +2,7 @@ import { DuckDBInstance } from '@duckdb/node-api';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { InstallerDatastore } from './InstallerDatastore.js';
+import { normalizeLabels } from '../Utils/Labels.js';
 
 // ---------------------------------------------------------------------------
 // Connection model
@@ -194,7 +195,7 @@ export class GraphDatastore {
     await this._run(
       `INSERT INTO nodes (id, type, labels, properties)
        VALUES ($1, $2, $3, $4::json)`,
-      [nodeId, type, labels, JSON.stringify(properties)]
+      [nodeId, type, normalizeLabels(labels), JSON.stringify(properties)]
     );
     return this.getNode(nodeId);
   }
@@ -213,7 +214,7 @@ export class GraphDatastore {
       ? { ...currentProps, ...properties }
       : currentProps;
 
-    const newLabels = labels !== undefined ? labels : node.labels;
+    const newLabels = labels !== undefined ? normalizeLabels(labels) : node.labels;
 
     await this._run(
       `UPDATE nodes
@@ -386,6 +387,24 @@ export class GraphDatastore {
 
     sql += ` ORDER BY updated_at DESC LIMIT ${parseInt(limit, 10)}`;
     return this._all(sql, params);
+  }
+
+  // --- Vocabulary (returned by get_schema) ----------------------------------------
+
+  async listLabels() {
+    const rows = await this._all(
+      `SELECT trim(l) AS label, count(*) AS n
+       FROM   nodes, unnest(string_split(labels, ',')) AS t(l)
+       WHERE  trim(l) <> ''
+       GROUP  BY 1
+       ORDER  BY n DESC, label`
+    );
+    return rows.map((r) => ({ label: r.label, count: Number(r.n) }));
+  }
+
+  async countNodesPerType() {
+    const rows = await this._all(`SELECT type, count(*) AS n FROM nodes GROUP BY type ORDER BY type`);
+    return Object.fromEntries(rows.map((r) => [r.type, Number(r.n)]));
   }
 
   // --- Schema migrations ----------------------------------------------------------

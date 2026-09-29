@@ -137,7 +137,7 @@ From then on, every conversation that connects to this server can read and write
 
 | Tool | Purpose |
 |---|---|
-| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels`, and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
+| `add_node` | Create a node — give it a `type` (must exist in the schema), optional `labels` (comma-separated string or array; trimmed and de-duplicated on write), and a free-form `properties` object. Properties not declared for the type are stored but reported back as `warnings`. |
 | `update_node` | Merge new properties and/or replace labels on an existing node. With `merge_from`, merge duplicate nodes into it (see [Dreaming](#dreaming--guided-cleanup)). |
 | `delete_node` | Delete a node. Any edges touching it are deleted automatically. |
 | `get_node` | Fetch a single node by ID. |
@@ -145,7 +145,7 @@ From then on, every conversation that connects to this server can read and write
 | `delete_edge` | Delete a single edge by ID. |
 | `list_edges` | List edges, optionally filtered by `source_id`, `target_id` and/or `type`. |
 | `search` | Case-insensitive text search across node properties, optionally filtered by `type`. |
-| `get_schema` | Return the current schema as YAML, including its revision number. |
+| `get_schema` | Return the current schema as YAML, including its revision number, plus the vocabulary in use: node counts per type and every label with its count. |
 | `apply_schema` | Apply additions, renames or removals to the schema (see below). |
 | `dreaming` | Get a paginated batch of nodes with their immediate edges, for guided cleanup — merging duplicates and adding missing relationships (see below). |
 | `bootstrap` | Load whatever identity, user context and working rules the agent has saved for itself, in one call (see below). |
