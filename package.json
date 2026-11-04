@@ -21,6 +21,6 @@
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.2"
   }
 }
