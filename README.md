@@ -254,7 +254,7 @@ A fresh conversation has no memory of who it's talking to or how it talked last 
 
 The server doesn't define what that node contains, doesn't validate it, and doesn't update it on its own. The agent owns it completely — typically a short block of plain text covering who the user is, what the agent's own role/name is, and any standing working rules worth repeating every session. The first time there's no `_bootstrap` node yet, the tool just says so and tells the agent how to create one with `add_node`.
 
-A typical first message in a new conversation looks like:
+If a client ignores `instructions`, a first message can ask for it directly:
 
 > Call `bootstrap` at the start of this conversation, then continue normally.
 
