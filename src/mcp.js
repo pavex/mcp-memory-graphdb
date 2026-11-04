@@ -1,9 +1,5 @@
-import { Server }                from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport }   from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema,
-         GetPromptRequestSchema,
-         ListPromptsRequestSchema,
-         ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Server } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z }                      from 'zod';
 import { GraphDatastore }         from './Datastore/GraphDatastore.js';
 import { SchemaManager }          from './Schema/SchemaManager.js';
@@ -33,73 +29,79 @@ const context = { repo, schema };
 const allTools = [...ToolDefinitions, ...SchemaTools];
 const handlers = new Map(allTools.map(t => [t.name, t.handler]));
 
-// --- Server ----------------------------------------------------------------------
-
-const server = new Server(
-  { name: Config.MCP_SERVER_NAME, version: Config.MCP_SERVER_VERSION },
-  { capabilities: { tools: {}, prompts: {} } }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: allTools.map(t => ({
-    name:        t.name,
-    description: t.description,
-    // io: 'input' - fields with .default() must stay optional for clients
-    inputSchema: z.toJSONSchema(t.inputSchema, { io: 'input' })
-  }))
-}));
-
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-  prompts: [{ name: 'setup', description: 'Review and customize the graph memory schema.' }]
-}));
-
-server.setRequestHandler(GetPromptRequestSchema, async (req) => {
-  if (req.params.name === 'setup') {
-    schema.reload();
-    return buildOnboardingPrompt(schema);
-  }
-  throw new Error(`Unknown prompt: ${req.params.name}`);
-});
-
 // Mutex -- DuckDB connection is not safe for concurrent async operations.
 // Across processes, the DuckDB file lock taken by repo.transaction() does the
 // same job; each tool call is one transaction (all-or-nothing).
 let queue = Promise.resolve();
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args } = req.params;
-  const handler = handlers.get(name);
+// --- Server ----------------------------------------------------------------------
+// serveStdio calls the factory once per connection, for whichever protocol era
+// the client opens with. Everything stateful above stays shared.
 
-  if (!handler) {
-    return {
-      content: [{ type: 'text', text: `Error: Unknown tool ${name}` }],
-      isError: true
-    };
-  }
+const createServer = () => {
+  const server = new Server(
+    { name: Config.MCP_SERVER_NAME, version: Config.MCP_SERVER_VERSION },
+    { capabilities: { tools: {}, prompts: {} } }
+  );
 
-  const result = await (queue = queue.then(async () => {
-    try {
-      const data = await repo.transaction(() => {
-        schema.reload();
-        return handler(args, context);
-      });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-    } catch (e) {
-      const message = e instanceof z.ZodError
-        ? `Validation Error: ${e.message}`
-        : `Error: ${e.message}`;
+  server.setRequestHandler('tools/list', async () => ({
+    tools: allTools.map(t => ({
+      name:        t.name,
+      description: t.description,
+      // io: 'input' - fields with .default() must stay optional for clients
+      inputSchema: z.toJSONSchema(t.inputSchema, { io: 'input' })
+    }))
+  }));
+
+  server.setRequestHandler('prompts/list', async () => ({
+    prompts: [{ name: 'setup', description: 'Review and customize the graph memory schema.' }]
+  }));
+
+  server.setRequestHandler('prompts/get', async (req) => {
+    if (req.params.name === 'setup') {
+      schema.reload();
+      return buildOnboardingPrompt(schema);
+    }
+    throw new Error(`Unknown prompt: ${req.params.name}`);
+  });
+
+  server.setRequestHandler('tools/call', async (req) => {
+    const { name, arguments: args } = req.params;
+    const handler = handlers.get(name);
+
+    if (!handler) {
       return {
-        content: [{ type: 'text', text: message }],
+        content: [{ type: 'text', text: `Error: Unknown tool ${name}` }],
         isError: true
       };
     }
-  }));
 
-  return result;
-});
+    const result = await (queue = queue.then(async () => {
+      try {
+        const data = await repo.transaction(() => {
+          schema.reload();
+          return handler(args, context);
+        });
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      } catch (e) {
+        const message = e instanceof z.ZodError
+          ? `Validation Error: ${e.message}`
+          : `Error: ${e.message}`;
+        return {
+          content: [{ type: 'text', text: message }],
+          isError: true
+        };
+      }
+    }));
+
+    return result;
+  });
+
+  return server;
+};
 
 process.on('exit', () => {
   repo.close();
 });
 
-await server.connect(new StdioServerTransport());
+serveStdio(createServer);

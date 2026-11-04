@@ -21,6 +21,12 @@ import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const MODERN_META = {
+  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+  'io.modelcontextprotocol/clientInfo': { name: 'integration-test', version: '1.0.0' },
+  'io.modelcontextprotocol/clientCapabilities': {}
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -71,6 +77,10 @@ function startServer(serverPath, dbPath) {
   };
 
   client.tool = (name, args = {}) => client.call('tools/call', { name, arguments: args });
+
+  // 2026-07-28 era: no handshake, every request carries the _meta envelope
+  client.modern = (method, params = {}) => client.call(method, { ...params, _meta: MODERN_META });
+  client.modernTool = (name, args = {}) => client.modern('tools/call', { name, arguments: args });
 
   client.init = async () => {
     const init = await client.call('initialize', {
@@ -228,6 +238,66 @@ async function runMultiSession(serverPath, label) {
 }
 
 // ---------------------------------------------------------------------------
+// Test: both protocol eras served from one server, against one database file
+// ---------------------------------------------------------------------------
+
+function assertToolList(resp, era) {
+  const addNode = resp?.result?.tools?.find((t) => t.name === 'add_node');
+  if (!addNode) throw new Error(`${era}: tools/list has no add_node: ${JSON.stringify(resp)}`);
+  if (JSON.stringify(addNode.inputSchema.required) !== '["type"]') {
+    throw new Error(`${era}: fields with defaults must stay optional: ${JSON.stringify(addNode.inputSchema.required)}`);
+  }
+}
+
+async function runProtocolEras(serverPath, label) {
+  const dbPath = path.resolve(__dirname, `integration_test_${label}_eras.duckdb`);
+  cleanup(dbPath);
+  const legacy = startServer(serverPath, dbPath);
+  const modern = startServer(serverPath, dbPath);
+
+  try {
+    // Legacy: initialize, tools/list, tools/call
+    await legacy.init();
+    assertToolList(await legacy.call('tools/list'), 'legacy');
+    const r1 = await legacy.tool('add_node', { id: 'legacy', type: 'person', properties: { name: 'Legacy' } });
+    if (!ok(r1)) throw new Error(`legacy add_node failed: ${text(r1)}`);
+
+    // Modern: server/discover, tools/list, tools/call
+    const r2 = await modern.modern('server/discover');
+    if (!r2?.result?.supportedVersions?.includes('2026-07-28') || !r2.result.capabilities?.tools) {
+      throw new Error(`server/discover failed: ${JSON.stringify(r2)}`);
+    }
+    assertToolList(await modern.modern('tools/list'), 'modern');
+    const r3 = await modern.modernTool('add_node', { id: 'modern', type: 'person', properties: { name: 'Modern' } });
+    if (!ok(r3)) throw new Error(`modern add_node failed: ${text(r3)}`);
+
+    // Same behaviour in both: data is shared, errors are tool results
+    const r4 = await modern.modernTool('get_node', { id: 'legacy' });
+    if (!ok(r4)) throw new Error(`modern cannot see legacy node: ${text(r4)}`);
+
+    const r5 = await legacy.tool('get_node', { id: 'modern' });
+    if (!ok(r5)) throw new Error(`legacy cannot see modern node: ${text(r5)}`);
+
+    for (const r of [await legacy.tool('no_such_tool'), await modern.modernTool('no_such_tool')]) {
+      if (!r?.result?.isError || !text(r).includes('Unknown tool')) throw new Error(`unknown tool: ${JSON.stringify(r)}`);
+    }
+
+    const r6 = await modern.modern('prompts/get', { name: 'setup' });
+    if (!r6?.result?.messages?.length) throw new Error(`modern prompts/get failed: ${JSON.stringify(r6)}`);
+
+    console.log(` ✓ Protocol eras integration test (${label}) OK`);
+  } catch (err) {
+    console.error(` ✗ Protocol eras integration test (${label}) FAILED: ${err.message}`);
+    if (legacy.stderr) console.error('--- STDERR LEGACY ---\n', legacy.stderr);
+    if (modern.stderr) console.error('--- STDERR MODERN ---\n', modern.stderr);
+    throw err;
+  } finally {
+    await Promise.all([legacy.shutdown(), modern.shutdown()]);
+    cleanup(dbPath);
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const target     = process.argv[2] || 'src';
 const serverFile = target === 'dist' ? '../dist/mcp.js' : '../src/mcp.js';
@@ -236,6 +306,7 @@ const serverPath = path.resolve(__dirname, serverFile);
 try {
   await runSingleSession(serverPath, target);
   await runMultiSession(serverPath, target);
+  await runProtocolEras(serverPath, target);
 } catch {
   process.exit(1);
 }

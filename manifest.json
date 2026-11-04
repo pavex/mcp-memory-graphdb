@@ -41,7 +41,7 @@
   "compatibility": {
     "platforms": ["win32", "darwin"],
     "runtimes": {
-      "node": ">=18"
+      "node": ">=20"
     }
   }
 }
