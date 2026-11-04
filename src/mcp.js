@@ -4,7 +4,6 @@ import { CallToolRequestSchema,
          GetPromptRequestSchema,
          ListPromptsRequestSchema,
          ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { zodToJsonSchema }        from 'zod-to-json-schema';
 import { z }                      from 'zod';
 import { GraphDatastore }         from './Datastore/GraphDatastore.js';
 import { SchemaManager }          from './Schema/SchemaManager.js';
@@ -45,7 +44,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: allTools.map(t => ({
     name:        t.name,
     description: t.description,
-    inputSchema: zodToJsonSchema(t.inputSchema)
+    // io: 'input' - fields with .default() must stay optional for clients
+    inputSchema: z.toJSONSchema(t.inputSchema, { io: 'input' })
   }))
 }));
 

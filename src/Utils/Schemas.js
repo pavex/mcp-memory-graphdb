@@ -8,13 +8,13 @@ export const Schemas = {
     id: z.string().optional(),
     type: z.string().min(1, 'type must not be empty'),
     labels: Labels.default(''),
-    properties: z.record(z.unknown()).default({})
+    properties: z.record(z.string(), z.unknown()).default({})
   }),
 
   update_node: z.object({
     id: z.string().min(1),
     labels: Labels.optional(),
-    properties: z.record(z.unknown()).optional(),
+    properties: z.record(z.string(), z.unknown()).optional(),
     merge_from: z.array(z.string().min(1)).min(1).optional()
       .describe('IDs of duplicate nodes to merge into this one: their edges are redirected here and they are deleted. Send the merged properties you composed from all of them in the same call.')
   }).refine(
@@ -35,7 +35,7 @@ export const Schemas = {
     type: z.string().min(1, 'type must not be empty'),
     source_id: z.string().min(1),
     target_id: z.string().min(1),
-    properties: z.record(z.unknown()).default({})
+    properties: z.record(z.string(), z.unknown()).default({})
   }),
 
   delete_edge: z.object({

@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 const NodeTypeSchema = z.object({
   description: z.string().min(1, 'description is required'),
-  properties: z.record(z.string()).optional()
+  properties: z.record(z.string(), z.string()).optional()
 }).strict();
 
 const EdgeTypeSchema = z.object({
@@ -55,8 +55,8 @@ export const IncomingSchemaShape = z.object({
   // revision is accepted but ignored - the server always recomputes it
   revision: z.number().int().min(0).optional(),
   migrations: z.array(MigrationSchema).optional(),
-  nodes: z.record(NodeTypeSchema).optional(),
-  edges: z.record(EdgeTypeSchema).optional()
+  nodes: z.record(z.string(), NodeTypeSchema).optional(),
+  edges: z.record(z.string(), EdgeTypeSchema).optional()
 }).strict().refine(
   (d) => {
     return d.nodes !== undefined || d.edges !== undefined || d.migrations !== undefined;
