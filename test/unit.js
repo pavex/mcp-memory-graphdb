@@ -6,7 +6,7 @@ import { SchemaManager } from '../src/Schema/SchemaManager.js';
 import { SchemaTools } from '../src/Tools/SchemaTool.js';
 import { normalizeLabels } from '../src/Utils/Labels.js';
 import { isSimilar, isRelated } from '../src/Utils/Similarity.js';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -338,6 +338,19 @@ async function testSchema() {
   const yamlStr = schema.toYaml();
   assert.ok(yamlStr.includes('revision:'), 'yaml must include revision');
   assert.ok(yamlStr.includes('utilizes'), 'yaml must reflect latest state');
+
+  // Strings that need quoting stay double-quoted
+  console.log(' - dump quoting...');
+  await schema.apply({ nodes: { quoted: { description: 'needs: quotes' } } });
+  assert.ok(schema.toYaml().includes('"needs: quotes"'), 'dump must use double quotes');
+
+  // An empty schema.yaml (another session mid-write) must not throw
+  console.log(' - empty schema.yaml...');
+  const emptyDir = mkdtempSync(join(tmpdir(), 'graphdb-schema-test-'));
+  const emptySchema = new SchemaManager(join(emptyDir, 'memory.duckdb'), repo);
+  writeFileSync(emptySchema.schemaPath, '');
+  assert.equal(emptySchema.load(), undefined);
+  rmSync(emptyDir, { recursive: true, force: true });
 
   // summarize — human readable, no throw
   console.log(' - summarize...');

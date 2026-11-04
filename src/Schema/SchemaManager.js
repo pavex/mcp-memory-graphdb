@@ -19,6 +19,12 @@ import { validateIncomingSchema } from './SchemaValidator.js';
 // what's simply absent.
 // ---------------------------------------------------------------------------
 
+const DUMP_OPTIONS = { lineWidth: 120, quoteStyle: 'double' };
+
+// load() throws on an empty document. Startup reads schema.yaml without the
+// database lock, so it can catch another session's write right after truncate.
+const parse = (raw) => raw.trim() ? load(raw) : undefined;
+
 export class SchemaManager {
   constructor(dbPath, repo) {
     this.schemaPath = join(dirname(dbPath), 'schema.yaml');
@@ -33,7 +39,7 @@ export class SchemaManager {
 
   load() {
     const raw = readFileSync(this.schemaPath, 'utf8');
-    this.schema = load(raw);
+    this.schema = parse(raw);
     this.raw = raw;
     return this.schema;
   }
@@ -48,21 +54,21 @@ export class SchemaManager {
     }
     const raw = readFileSync(this.schemaPath, 'utf8');
     if (raw !== this.raw) {
-      this.schema = load(raw);
+      this.schema = parse(raw);
       this.raw = raw;
     }
     return this.schema;
   }
 
   save(schema) {
-    const yaml = dump(schema, { lineWidth: 120, quotingType: '"' });
+    const yaml = dump(schema, DUMP_OPTIONS);
     writeFileSync(this.schemaPath, yaml, 'utf8');
     this.schema = schema;
     this.raw = yaml;
   }
 
   toYaml() {
-    return dump(this.schema, { lineWidth: 120, quotingType: '"' });
+    return dump(this.schema, DUMP_OPTIONS);
   }
 
   getDefault() {
