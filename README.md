@@ -57,7 +57,7 @@ It runs on [DuckDB](https://duckdb.org), an embedded, file-based analytical data
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) 18 or later
+- [Node.js](https://nodejs.org) 20 or later
 - Windows or macOS (Linux works too if you build the native DuckDB bindings yourself — see [Compatibility](#compatibility) below)
 - An MCP-compatible client: [Claude Desktop](https://claude.ai/download), [Claude Code](https://docs.claude.com/en/docs/claude-code), or any other MCP host
 
@@ -118,6 +118,22 @@ The server takes one optional argument: where to put the `.duckdb` file.
 A path containing `/` or `\` is always treated as a direct file location; anything else is treated as a short name and stored under `.var/` next to the server. This lets you run multiple independent memories — e.g. one per project, or one personal and one work-related — just by pointing each MCP server entry at a different name or path.
 
 The schema file (`schema.yaml`, see below) always lives in the same directory as the database file.
+
+### Loading bootstrap automatically
+
+By default the server puts the `_bootstrap` node into its MCP `instructions`, so the agent has it from the first message (see [Bootstrap](#bootstrap--session-identity)). To turn that off, set the environment variable `BOOTSTRAP_IN_INSTRUCTIONS` to `false`, or switch off *Load bootstrap automatically* in the `.mcpb` extension settings:
+
+```json
+{
+  "mcpServers": {
+    "memory-graph": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-memory-graphdb/dist/mcp.js"],
+      "env": { "BOOTSTRAP_IN_INSTRUCTIONS": "false" }
+    }
+  }
+}
+```
 
 ### Multiple sessions sharing one database
 
@@ -246,7 +262,16 @@ And updating it later is just as direct:
 
 > Update the bootstrap node — note that we're now using TypeScript strict mode by default.
 
-Because `bootstrap` takes no arguments and the tool description itself says to call it first, most setups never need this spelled out explicitly — it's there the moment the agent looks at what tools are available.
+Clients often load only tool names and the server's `instructions` at session start, so a tool description alone can't tell the agent to call `bootstrap` first. The server therefore uses `instructions`, in one of two ways:
+
+| `BOOTSTRAP_IN_INSTRUCTIONS` | What `instructions` contain |
+|---|---|
+| *(unset)* or any value but `false` | A short description of the server and the text of `_bootstrap`. No call is needed. |
+| `false` | The description and a request to call `bootstrap`, which keeps the node out of the system prompt. |
+
+The text is read when the server starts, so a change applies from the next session. If the node is missing, or the database stays locked for more than 1.5 seconds, the server falls back to the request to call `bootstrap`. Text beyond 4,096 characters in total is cut, with a note to call `bootstrap` for the rest; that is where Claude Code cuts instructions.
+
+The text ends up in the system prompt of every session, in every client that uses this server, and agents treat it as instructions rather than data. Keep it short, and leave out anything you wouldn't want there. The `bootstrap` tool stays available either way, for clients that ignore `instructions`.
 
 ## Project structure
 
@@ -258,7 +283,7 @@ mcp-memory-graphdb/
 ├── mcpb.cmd / mcpb.sh           # package dist/ into a .mcpb file
 ├── src/
 │   ├── mcp.js                  # server entry point — tool & prompt registration
-│   ├── Config.js                # database path resolution from argv
+│   ├── Config.js                # database path from argv, bootstrap switch from env
 │   ├── Datastore/
 │   │   ├── InstallerDatastore.js   # creates the nodes/edges tables
 │   │   └── GraphDatastore.js       # all node/edge CRUD + search + schema-migration primitives
@@ -268,7 +293,8 @@ mcp-memory-graphdb/
 │   │   └── SchemaValidator.js      # strict structural validation (Zod)
 │   ├── Tools/                   # one file per tool group (incl. DreamingTool.js, BootstrapTool.js)
 │   ├── Prompts/
-│   │   └── OnboardingPrompt.js      # the "setup" MCP prompt
+│   │   ├── OnboardingPrompt.js      # the "setup" MCP prompt
+│   │   └── ServerInstructions.js    # the MCP instructions text
 │   └── Utils/
 │       └── Schemas.js            # Zod input schemas for every tool
 └── test/

@@ -37,8 +37,8 @@ function cleanup(dbPath) {
   }
 }
 
-function startServer(serverPath, dbPath) {
-  const server = spawn('node', [serverPath, dbPath]);
+function startServer(serverPath, dbPath, env = {}) {
+  const server = spawn('node', [serverPath, dbPath], { env: { ...process.env, ...env } });
   let buffer = '';
   const pending = new Map(); // id → resolve
   const client = { stderr: '' };
@@ -297,6 +297,64 @@ async function runProtocolEras(serverPath, label) {
   }
 }
 
+async function runInstructions(serverPath, label) {
+  const dbPath = path.resolve(__dirname, `integration_test_${label}_instructions.duckdb`);
+  cleanup(dbPath);
+
+  const legacyInstructions = async (env) => {
+    const client = startServer(serverPath, dbPath, env);
+    const r = await client.call('initialize', {
+      protocolVersion: '2025-11-25',
+      capabilities: {},
+      clientInfo: { name: 'integration-test', version: '1.0.0' }
+    });
+    await client.shutdown();
+    return r?.result?.instructions ?? '';
+  };
+
+  const modernInstructions = async (env) => {
+    const client = startServer(serverPath, dbPath, env);
+    const r = await client.modern('server/discover');
+    await client.shutdown();
+    return r?.result?.instructions ?? '';
+  };
+
+  const secret = 'Bootstrap text for the test';
+
+  try {
+    // No node yet: point at the tool, even with the switch on
+    if (!(await legacyInstructions()).includes('call `bootstrap`')) {
+      throw new Error('instructions must point at bootstrap while the node is missing');
+    }
+
+    const writer = startServer(serverPath, dbPath);
+    await writer.init();
+    const r = await writer.tool('add_node', { id: '_bootstrap', type: 'concept', properties: { text: secret } });
+    if (!ok(r)) throw new Error(`add_node failed: ${text(r)}`);
+    await writer.shutdown();
+
+    // Default: on, in both eras
+    for (const read of [legacyInstructions, modernInstructions]) {
+      if (!(await read()).includes(secret)) throw new Error('default instructions must contain the node');
+    }
+
+    // Off: the node stays out, in both eras
+    for (const read of [legacyInstructions, modernInstructions]) {
+      const body = await read({ BOOTSTRAP_IN_INSTRUCTIONS: 'false' });
+      if (body.includes(secret) || !body.includes('call `bootstrap`')) {
+        throw new Error(`switched off instructions are wrong: ${body}`);
+      }
+    }
+
+    console.log(` ✓ Instructions integration test (${label}) OK`);
+  } catch (err) {
+    console.error(` ✗ Instructions integration test (${label}) FAILED: ${err.message}`);
+    throw err;
+  } finally {
+    cleanup(dbPath);
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 const target     = process.argv[2] || 'src';
@@ -307,6 +365,7 @@ try {
   await runSingleSession(serverPath, target);
   await runMultiSession(serverPath, target);
   await runProtocolEras(serverPath, target);
+  await runInstructions(serverPath, target);
 } catch {
   process.exit(1);
 }

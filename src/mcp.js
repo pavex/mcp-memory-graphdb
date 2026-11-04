@@ -6,6 +6,7 @@ import { SchemaManager }          from './Schema/SchemaManager.js';
 import { ToolDefinitions }        from './Tools/ToolDefinitions.js';
 import { SchemaTools }            from './Tools/SchemaTool.js';
 import { buildOnboardingPrompt }  from './Prompts/OnboardingPrompt.js';
+import { BOOTSTRAP_ID, buildInstructions } from './Prompts/ServerInstructions.js';
 import { Config }                 from './Config.js';
 
 // --- Bootstrap ---------------------------------------------------------------
@@ -34,6 +35,17 @@ const handlers = new Map(allTools.map(t => [t.name, t.handler]));
 // same job; each tool call is one transaction (all-or-nothing).
 let queue = Promise.resolve();
 
+// --- Instructions -------------------------------------------------------------
+// Read once per process: each session starts its own server. A read that
+// outlives the startup timeout stays first in the queue.
+
+const bootstrapRead = Config.BOOTSTRAP_IN_INSTRUCTIONS
+  ? repo.getNode(BOOTSTRAP_ID)
+  : Promise.resolve(null);
+queue = bootstrapRead.catch(() => {});
+
+const instructions = await buildInstructions(bootstrapRead);
+
 // --- Server ----------------------------------------------------------------------
 // serveStdio calls the factory once per connection, for whichever protocol era
 // the client opens with. Everything stateful above stays shared.
@@ -41,7 +53,7 @@ let queue = Promise.resolve();
 const createServer = () => {
   const server = new Server(
     { name: Config.MCP_SERVER_NAME, version: Config.MCP_SERVER_VERSION },
-    { capabilities: { tools: {}, prompts: {} } }
+    { capabilities: { tools: {}, prompts: {} }, instructions }
   );
 
   server.setRequestHandler('tools/list', async () => ({

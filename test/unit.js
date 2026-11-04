@@ -6,6 +6,7 @@ import { SchemaManager } from '../src/Schema/SchemaManager.js';
 import { SchemaTools } from '../src/Tools/SchemaTool.js';
 import { normalizeLabels } from '../src/Utils/Labels.js';
 import { isSimilar, isRelated } from '../src/Utils/Similarity.js';
+import { MAX_LENGTH, buildInstructions, renderInstructions } from '../src/Prompts/ServerInstructions.js';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -674,6 +675,33 @@ async function testTypeMerge() {
   console.log(' ✓ Unknown types + rename merge OK');
 }
 
+async function testInstructions() {
+  const pointer = renderInstructions(null);
+  assert.ok(pointer.includes('call `bootstrap`'), 'no node must point at the tool');
+
+  const inline = renderInstructions({ properties: { text: '  I am Krab.  ' } });
+  assert.ok(inline.endsWith('I am Krab.'), 'text must be inlined and trimmed');
+  assert.ok(inline.includes('No `bootstrap` call is needed'));
+
+  const structured = renderInstructions({ properties: { role: 'helper' } });
+  assert.ok(structured.includes('"role": "helper"'), 'other properties must be serialized');
+
+  const exact = renderInstructions({ properties: { text: 'x' } });
+  const fits = 'y'.repeat(MAX_LENGTH - exact.length + 1);
+  assert.equal(renderInstructions({ properties: { text: fits } }).length, MAX_LENGTH);
+  assert.ok(!renderInstructions({ properties: { text: fits } }).includes('Truncated'));
+
+  const cut = renderInstructions({ properties: { text: 'y'.repeat(MAX_LENGTH * 2) } });
+  assert.equal(cut.length, MAX_LENGTH);
+  assert.ok(cut.endsWith('Call `bootstrap` for the full text.]'));
+
+  assert.equal(await buildInstructions(Promise.resolve(null)), pointer);
+  assert.equal(await buildInstructions(Promise.reject(new Error('locked'))), pointer);
+  assert.equal(await buildInstructions(new Promise(() => {}), 10), pointer, 'a hung read must time out');
+
+  console.log(' ✓ Instructions OK');
+}
+
 async function run() {
   console.log('Starting tests...\n');
   await testInstaller();
@@ -683,6 +711,7 @@ async function run() {
   await testMerge();
   await testVocabulary();
   await testTypeMerge();
+  await testInstructions();
   console.log('\nAll tests passed!');
 }
 

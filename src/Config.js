@@ -27,5 +27,7 @@ if (arg) {
 export const Config = {
   DB_PATH: dbPath,
   MCP_SERVER_NAME: 'mcp-memory-graphdb',
-  MCP_SERVER_VERSION: '0.1.0'
+  MCP_SERVER_VERSION: '0.1.0',
+  // false -> instructions only point at the bootstrap tool
+  BOOTSTRAP_IN_INSTRUCTIONS: process.env.BOOTSTRAP_IN_INSTRUCTIONS !== 'false'
 };

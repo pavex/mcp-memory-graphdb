@@ -12,7 +12,10 @@
     "entry_point": "dist/mcp.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/mcp.js", "${user_config.db_name}"]
+      "args": ["${__dirname}/dist/mcp.js", "${user_config.db_name}"],
+      "env": {
+        "BOOTSTRAP_IN_INSTRUCTIONS": "${user_config.bootstrap_in_instructions}"
+      }
     }
   },
   "tools": [
@@ -36,6 +39,13 @@
       "description": "Name of the memory database (e.g. 'work' → work.duckdb) or an absolute path. Leave empty for default.",
       "required": false,
       "default": ""
+    },
+    "bootstrap_in_instructions": {
+      "type": "boolean",
+      "title": "Load bootstrap automatically",
+      "description": "Put the _bootstrap node into the server instructions, so the agent has it from the first message. Its text then reaches the system prompt of every session. When off, the instructions only tell the agent to call the bootstrap tool.",
+      "required": false,
+      "default": true
     }
   },
   "compatibility": {
