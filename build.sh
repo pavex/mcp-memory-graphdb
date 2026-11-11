@@ -17,5 +17,5 @@ echo ""
 echo "Done! dist/ is self-contained:"
 echo "  dist/mcp.js      - bundled MCP server"
 echo "  dist/duckdb.node - native DuckDB binding"
-echo "  dist/duckdb.so   - DuckDB shared library (Linux/macOS)"
+echo "  dist/libduckdb.*  - DuckDB shared library (.so on Linux, .dylib on macOS)"
 printf '\a' 2>/dev/null || true

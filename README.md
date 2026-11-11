@@ -58,7 +58,7 @@ It runs on [DuckDB](https://duckdb.org), an embedded, file-based analytical data
 ## Requirements
 
 - [Node.js](https://nodejs.org) 20 or later
-- Windows or macOS (Linux works too if you build the native DuckDB bindings yourself — see [Compatibility](#compatibility) below)
+- Windows, macOS or Linux (glibc or musl), x64 or arm64 — see [Compatibility](#compatibility) below
 - An MCP-compatible client: [Claude Desktop](https://claude.ai/download), [Claude Code](https://docs.claude.com/en/docs/claude-code), or any other MCP host
 
 ## Installation
@@ -328,6 +328,8 @@ node build.mjs --mcpb
 
 or simply run `mcpb.cmd` / `mcpb.sh`, which do the full install → build → package → cleanup cycle in one go. The result is `mcpb/mcp-memory-graphdb.mcpb`, ready to double-click into Claude Desktop.
 
+The package contains the native DuckDB binaries of the machine it was built on, so it only runs on that platform and architecture. Build it on the platform you want to run it on.
+
 ## Roadmap
 
 This is **Phase 2** of the project — graph CRUD, a fully deterministic and validated schema system, and a guided dreaming/cleanup workflow. Open for the future:
@@ -336,7 +338,11 @@ This is **Phase 2** of the project — graph CRUD, a fully deterministic and val
 
 ## Compatibility
 
-Native DuckDB bindings are platform-specific. This project has been built and tested on **Windows (x64)**. macOS should work out of the box once built there (DuckDB ships official bindings for `darwin-x64` and `darwin-arm64`); Linux requires the matching `@duckdb/node-bindings-linux-*` package to be available for your architecture at build time.
+Native DuckDB bindings are platform-specific, and `build.mjs` copies the ones for the machine it runs on. DuckDB ships official bindings for Windows, macOS and Linux on x64 and arm64; on Linux the build picks the glibc or musl (Alpine) variant automatically.
+
+Built and tested on **Windows (x64)** and on **Linux x64** with both glibc (Debian) and musl (Alpine). macOS should work the same way but has not been tested yet.
+
+On Linux, `mcpb.sh` needs the `zip` command to pack the package. The DuckDB shared library is large there (`libduckdb.so` is about 90 MB, the packed `.mcpb` about 28 MB).
 
 ## License
 

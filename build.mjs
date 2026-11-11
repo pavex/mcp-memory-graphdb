@@ -9,7 +9,10 @@ import { execSync }                    from 'node:child_process';
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const platform  = process.platform;
 const arch      = process.arch;
-const pkgPath   = join(__dirname, 'node_modules/@duckdb', `node-bindings-${platform}-${arch}`);
+// Linux has separate DuckDB bindings for musl (Alpine); glibc reports its version
+const musl      = platform === 'linux' && !process.report.getReport().header.glibcVersionRuntime;
+const pkgName   = `node-bindings-${platform}-${arch}${musl ? '-musl' : ''}`;
+const pkgPath   = join(__dirname, 'node_modules/@duckdb', pkgName);
 
 if (!existsSync(pkgPath)) {
   console.error(`ERROR: DuckDB bindings not found: ${pkgPath}`);
