@@ -52,6 +52,9 @@ console.log('  esbuild: dist/mcp.js OK');
 copyFileSync(join(__dirname, 'schema.default.yaml'), join('dist', 'schema.default.yaml'));
 console.log('  copied:  dist/schema.default.yaml');
 
+copyFileSync(join(__dirname, 'config.example.json'), join('dist', 'config.example.json'));
+console.log('  copied:  dist/config.example.json');
+
 const files = readdirSync(pkgPath).filter(f =>
   f.endsWith('.node') || f.endsWith('.dll') || f.endsWith('.so') || f.endsWith('.dylib')
 );

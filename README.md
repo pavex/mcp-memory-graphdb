@@ -17,6 +17,7 @@ If you're looking for a Claude memory MCP server, a persistent memory backend fo
   - [Option A — one-click install via .mcpb](#option-a--one-click-install-via-mcpb)
   - [Option B — manual install (claude_desktop_config.json)](#option-b--manual-install-claude_desktop_configjson)
   - [Choosing the database file](#choosing-the-database-file)
+  - [Configuration file](#configuration-file)
 - [How it works](#how-it-works)
 - [The tools](#the-tools)
 - [Working with the schema](#working-with-the-schema)
@@ -107,21 +108,58 @@ If you'd rather wire it in by hand, or you're using a different MCP client:
 
 ### Choosing the database file
 
-The server takes one optional argument: where to put the `.duckdb` file.
+The server takes one optional argument: where to put the `.duckdb` file, or a [configuration file](#configuration-file).
 
 | Argument | Result |
 |---|---|
 | *(none)* | `.var/memory.duckdb` inside the project folder |
 | `work` | `.var/work.duckdb` inside the project folder — a named, separate memory |
 | `/absolute/path/to/file.duckdb` | exactly that path, anywhere on disk |
+| `/path/to/config.json` | a configuration file (any argument ending in `.json`) — see below |
 
 A path containing `/` or `\` is always treated as a direct file location; anything else is treated as a short name and stored under `.var/` next to the server. This lets you run multiple independent memories — e.g. one per project, or one personal and one work-related — just by pointing each MCP server entry at a different name or path.
 
 The schema file (`schema.yaml`, see below) always lives in the same directory as the database file.
 
+### Configuration file
+
+An argument ending in `.json` is read as a configuration file instead of a database path (absolute, or relative to the working directory):
+
+```
+node dist/mcp.js /path/to/config.json
+```
+
+The build puts `config.example.json` next to `mcp.js`:
+
+```json
+{
+  "database": "memory.duckdb",
+  "bootstrapInInstructions": true
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `database` | `memory.duckdb` | The database file. A relative path is relative to the config file's folder, not to the working directory. |
+| `bootstrapInInstructions` | `BOOTSTRAP_IN_INSTRUCTIONS` env, else `true` | Put the `_bootstrap` node into the MCP `instructions` (see [Loading bootstrap automatically](#loading-bootstrap-automatically)). When set, it wins over the environment variable. |
+
+Every string may contain `${NAME}`, which is replaced by the environment variable `NAME`; an unset variable stops the server with an error that names it and the key. `$${NAME}` stays a literal `${NAME}`. Unknown keys and wrong types are rejected too. Any config problem stops the server with exit code 1 and one line on stderr that says what to fix, e.g.:
+
+```
+ERROR: Environment variable DATA_DIR is not set (used in config.database)
+```
+
+This is how a hub can keep the server's config next to `mcp.js` and pass the data folder per user — a config in `servers/memory-graphdb/config.json` with
+
+```json
+{ "database": "../../${DATA_DIR}/memory.duckdb" }
+```
+
+and the server started as `node servers/memory-graphdb/mcp.js servers/memory-graphdb/config.json` with `DATA_DIR` in its environment. Without a `.json` argument the server behaves exactly as described above.
+
 ### Loading bootstrap automatically
 
-By default the server puts the `_bootstrap` node into its MCP `instructions`, so the agent has it from the first message (see [Bootstrap](#bootstrap--session-identity)). To turn that off, set the environment variable `BOOTSTRAP_IN_INSTRUCTIONS` to `false`, or switch off *Load bootstrap automatically* in the `.mcpb` extension settings:
+By default the server puts the `_bootstrap` node into its MCP `instructions`, so the agent has it from the first message (see [Bootstrap](#bootstrap--session-identity)). To turn that off, set the environment variable `BOOTSTRAP_IN_INSTRUCTIONS` to `false`, set `"bootstrapInInstructions": false` in a [configuration file](#configuration-file), or switch off *Load bootstrap automatically* in the `.mcpb` extension settings:
 
 ```json
 {
@@ -264,7 +302,7 @@ And updating it later is just as direct:
 
 Clients often load only tool names and the server's `instructions` at session start, so a tool description alone can't tell the agent to call `bootstrap` first. The server therefore uses `instructions`, in one of two ways:
 
-| `BOOTSTRAP_IN_INSTRUCTIONS` | What `instructions` contain |
+| `BOOTSTRAP_IN_INSTRUCTIONS` (or `bootstrapInInstructions` in a config) | What `instructions` contain |
 |---|---|
 | *(unset)* or any value but `false` | A short description of the server and the text of `_bootstrap`. No call is needed. |
 | `false` | The description and a request to call `bootstrap`, which keeps the node out of the system prompt. |
@@ -278,12 +316,13 @@ The text ends up in the system prompt of every session, in every client that use
 ```
 mcp-memory-graphdb/
 ├── schema.default.yaml        # revision 0 — the schema a fresh database starts with
+├── config.example.json         # example configuration file, copied to dist/
 ├── manifest.json               # .mcpb / Desktop Extension manifest
 ├── build.mjs / build.cmd / build.sh    # bundle + copy native DuckDB bindings + test
 ├── mcpb.cmd / mcpb.sh           # package dist/ into a .mcpb file
 ├── src/
 │   ├── mcp.js                  # server entry point — tool & prompt registration
-│   ├── Config.js                # database path from argv, bootstrap switch from env
+│   ├── Config.js                # first argument: database path or .json config; bootstrap switch
 │   ├── Datastore/
 │   │   ├── InstallerDatastore.js   # creates the nodes/edges tables
 │   │   └── GraphDatastore.js       # all node/edge CRUD + search + schema-migration primitives
@@ -318,7 +357,7 @@ This runs `test/unit.js` (in-memory DuckDB, no real files touched) followed by `
 node build.mjs
 ```
 
-Bundles `src/mcp.js` with esbuild, copies the platform-specific native DuckDB bindings (`duckdb.node` plus the platform shared library) into `dist/`, and copies `schema.default.yaml` alongside. `build.cmd` / `build.sh` wrap this with a full install → build → test → cleanup cycle, ending in an audible beep so you don't have to watch the terminal.
+Bundles `src/mcp.js` with esbuild, copies the platform-specific native DuckDB bindings (`duckdb.node` plus the platform shared library) into `dist/`, and copies `schema.default.yaml` and `config.example.json` alongside. `build.cmd` / `build.sh` wrap this with a full install → build → test → cleanup cycle, ending in an audible beep so you don't have to watch the terminal.
 
 ### Packaging as a .mcpb extension
 

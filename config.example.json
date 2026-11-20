@@ -1,0 +1,4 @@
+{
+  "database": "memory.duckdb",
+  "bootstrapInInstructions": true
+}

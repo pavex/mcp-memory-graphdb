@@ -14,10 +14,11 @@
  * changes (data and schema).
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import os from 'node:os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,8 +38,9 @@ function cleanup(dbPath) {
   }
 }
 
-function startServer(serverPath, dbPath, env = {}) {
-  const server = spawn('node', [serverPath, dbPath], { env: { ...process.env, ...env } });
+// arg = the first argument of mcp.js: a database path or a .json config
+function startServer(serverPath, arg, env = {}) {
+  const server = spawn('node', [serverPath, arg], { env: { ...process.env, ...env } });
   let buffer = '';
   const pending = new Map(); // id → resolve
   const client = { stderr: '' };
@@ -356,6 +358,101 @@ async function runInstructions(serverPath, label) {
 }
 
 // ---------------------------------------------------------------------------
+// Test: started with a .json config — database path, ${NAME}, bootstrap key
+// ---------------------------------------------------------------------------
+
+async function runConfigFile(serverPath, label) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `graphdb-config-${label}-`));
+  const configPath = path.join(dir, 'config.json');
+  const dbPath = path.join(dir, 'data', 'from-config.duckdb');
+  const env = { GRAPHDB_TEST_DATA: 'data' };
+  const writeConfig = (bootstrapInInstructions) => fs.writeFileSync(configPath, JSON.stringify({
+    database: '${GRAPHDB_TEST_DATA}/from-config.duckdb',
+    bootstrapInInstructions
+  }));
+  const instructions = async (extraEnv = {}) => {
+    const client = startServer(serverPath, configPath, { ...env, ...extraEnv });
+    const r = await client.modern('server/discover');
+    await client.shutdown();
+    return r?.result?.instructions ?? '';
+  };
+  const secret = 'Bootstrap text from the config test';
+
+  try {
+    // The database lands where the config says, relative to the config's folder
+    writeConfig(true);
+    const s = startServer(serverPath, configPath, env);
+    await s.init();
+    const r = await s.tool('add_node', { id: '_bootstrap', type: 'concept', properties: { text: secret } });
+    await s.shutdown();
+    if (!ok(r)) throw new Error(`add_node failed: ${text(r)} ${s.stderr}`);
+    if (!fs.existsSync(dbPath)) throw new Error(`database not created at ${dbPath}`);
+    if (!fs.existsSync(path.join(dir, 'data', 'schema.yaml'))) throw new Error('schema.yaml not next to the database');
+
+    // The config key decides, and wins over the environment variable
+    if (!(await instructions({ BOOTSTRAP_IN_INSTRUCTIONS: 'false' })).includes(secret)) {
+      throw new Error('bootstrapInInstructions: true must put the node into the instructions');
+    }
+    writeConfig(false);
+    const off = await instructions();
+    if (off.includes(secret) || !off.includes('call `bootstrap`')) {
+      throw new Error(`bootstrapInInstructions: false instructions are wrong: ${off}`);
+    }
+
+    // The key left out falls back to the environment variable
+    writeConfig(undefined);
+    if ((await instructions({ BOOTSTRAP_IN_INSTRUCTIONS: 'false' })).includes(secret)) {
+      throw new Error('without the key, BOOTSTRAP_IN_INSTRUCTIONS=false must apply');
+    }
+
+    console.log(` ✓ Config file integration test (${label}) OK`);
+  } catch (err) {
+    console.error(` ✗ Config file integration test (${label}) FAILED: ${err.message}`);
+    throw err;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test: a bad config stops the server with exit 1 and one line on stderr
+// ---------------------------------------------------------------------------
+
+function runConfigErrors(serverPath, label) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `graphdb-config-errors-${label}-`));
+  const env = { ...process.env };
+  delete env.GRAPHDB_TEST_UNSET;
+  const cases = [
+    ['unset.json', '{ "database": "${GRAPHDB_TEST_UNSET}/memory.duckdb" }',
+      'ERROR: Environment variable GRAPHDB_TEST_UNSET is not set (used in config.database)'],
+    ['unknown.json', '{ "dbPath": "memory.duckdb" }', 'ERROR: Invalid config: '],
+    ['type.json', '{ "bootstrapInInstructions": "no" }', 'ERROR: Invalid config: bootstrapInInstructions: '],
+    ['broken.json', '{ "database": ', 'ERROR: Invalid JSON in '],
+    ['missing.json', null, 'ERROR: Unable to read config at ']
+  ];
+
+  try {
+    for (const [file, content, expected] of cases) {
+      const configPath = path.join(dir, file);
+      if (content !== null) fs.writeFileSync(configPath, content);
+      const run = spawnSync('node', [serverPath, configPath], { env, encoding: 'utf8', timeout: 15000 });
+      if (run.status !== 1 || !run.stderr.startsWith(expected)) {
+        throw new Error(`${file}: expected exit 1 with "${expected}", got ${run.status}: ${run.stderr}`);
+      }
+      if (run.stderr.trim().includes('\n')) {
+        throw new Error(`${file}: expected one line on stderr, got: ${run.stderr}`);
+      }
+    }
+    console.log(` ✓ Config errors integration test (${label}) OK`);
+  } catch (err) {
+    console.error(` ✗ Config errors integration test (${label}) FAILED: ${err.message}`);
+    throw err;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const target     = process.argv[2] || 'src';
 const serverFile = target === 'dist' ? '../dist/mcp.js' : '../src/mcp.js';
@@ -366,6 +463,8 @@ try {
   await runMultiSession(serverPath, target);
   await runProtocolEras(serverPath, target);
   await runInstructions(serverPath, target);
+  await runConfigFile(serverPath, target);
+  runConfigErrors(serverPath, target);
 } catch {
   process.exit(1);
 }

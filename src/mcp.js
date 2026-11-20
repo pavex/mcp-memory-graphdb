@@ -7,7 +7,19 @@ import { ToolDefinitions }        from './Tools/ToolDefinitions.js';
 import { SchemaTools }            from './Tools/SchemaTool.js';
 import { buildOnboardingPrompt }  from './Prompts/OnboardingPrompt.js';
 import { BOOTSTRAP_ID, buildInstructions } from './Prompts/ServerInstructions.js';
-import { Config }                 from './Config.js';
+import { loadConfig }             from './Config.js';
+
+// --- Config --------------------------------------------------------------------
+// node mcp.js [database | name | config.json] - see Config.js. A config
+// problem stops the server with one line that says what to fix.
+
+let Config;
+try {
+  Config = loadConfig(process.argv[2]);
+} catch (error) {
+  process.stderr.write(`ERROR: ${error.message}\n`);
+  process.exit(1);
+}
 
 // --- Bootstrap ---------------------------------------------------------------
 // The database file is NOT held open here - GraphDatastore opens it per tool

@@ -7,9 +7,11 @@ import { SchemaTools } from '../src/Tools/SchemaTool.js';
 import { normalizeLabels } from '../src/Utils/Labels.js';
 import { isSimilar, isRelated } from '../src/Utils/Similarity.js';
 import { MAX_LENGTH, buildInstructions, renderInstructions } from '../src/Prompts/ServerInstructions.js';
+import { loadConfig, parseConfig } from '../src/Config.js';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Helper: in-memory repo with schema installed
@@ -702,6 +704,74 @@ async function testInstructions() {
   console.log(' ✓ Instructions OK');
 }
 
+// ---------------------------------------------------------------------------
+// Test: Config — database arguments, JSON config, ${NAME}, errors
+// ---------------------------------------------------------------------------
+
+async function testConfig() {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const env = {};
+
+  // Database arguments behave as before
+  assert.equal(loadConfig(undefined, env).DB_PATH, join(root, '.var', 'memory.duckdb'));
+  assert.equal(loadConfig('', env).DB_PATH, join(root, '.var', 'memory.duckdb'));
+  assert.equal(loadConfig('work', env).DB_PATH, join(root, '.var', 'work.duckdb'));
+  assert.equal(loadConfig('work.duckdb', env).DB_PATH, join(root, '.var', 'work.duckdb'));
+  assert.equal(loadConfig('data/my.db', env).DB_PATH, resolve('data/my.db'));
+  const absolute = resolve(tmpdir(), 'memory.duckdb');
+  assert.equal(loadConfig(absolute, env).DB_PATH, absolute);
+  assert.equal(loadConfig('work', env).BOOTSTRAP_IN_INSTRUCTIONS, true);
+  assert.equal(loadConfig('work', { BOOTSTRAP_IN_INSTRUCTIONS: 'false' }).BOOTSTRAP_IN_INSTRUCTIONS, false);
+  assert.equal(loadConfig('work', env).MCP_SERVER_NAME, 'mcp-memory-graphdb');
+
+  // parseConfig: defaults, relative path from the config folder, ${NAME}, $${NAME}
+  const base = resolve(tmpdir(), 'graphdb-config');
+  assert.equal(parseConfig({}, env, base).DB_PATH, join(base, 'memory.duckdb'));
+  assert.equal(parseConfig({}, env, base).BOOTSTRAP_IN_INSTRUCTIONS, true);
+  assert.equal(parseConfig({}, { BOOTSTRAP_IN_INSTRUCTIONS: 'false' }, base).BOOTSTRAP_IN_INSTRUCTIONS, false);
+  assert.equal(
+    parseConfig({ bootstrapInInstructions: true }, { BOOTSTRAP_IN_INSTRUCTIONS: 'false' }, base).BOOTSTRAP_IN_INSTRUCTIONS,
+    true,
+    'the config key wins over the environment'
+  );
+  assert.equal(
+    parseConfig({ database: '../../${DATA_DIR}/memory.duckdb' }, { DATA_DIR: 'data-x/memory' }, join(base, 'a', 'b')).DB_PATH,
+    join(base, 'data-x', 'memory', 'memory.duckdb')
+  );
+  assert.equal(parseConfig({ database: absolute }, env, base).DB_PATH, absolute);
+  assert.equal(parseConfig({ database: 'db/$${NAME}.duckdb' }, env, base).DB_PATH, join(base, 'db', '${NAME}.duckdb'));
+
+  // Errors name what is wrong
+  assert.throws(() => parseConfig([], env, base), /^Error: Config must be a JSON object$/);
+  assert.throws(() => parseConfig(null, env, base), /Config must be a JSON object/);
+  assert.throws(
+    () => parseConfig({ database: '${DATA_DIR}/memory.duckdb' }, env, base),
+    /Environment variable DATA_DIR is not set \(used in config\.database\)/
+  );
+  assert.throws(() => parseConfig({ database: '' }, env, base), /^Error: Invalid config: database: /);
+  assert.throws(() => parseConfig({ database: 5 }, env, base), /Invalid config: database: /);
+  assert.throws(() => parseConfig({ bootstrapInInstructions: 'false' }, env, base), /Invalid config: bootstrapInInstructions: /);
+  assert.throws(() => parseConfig({ dbPath: 'x.duckdb' }, env, base), /Invalid config: config: .*dbPath/);
+
+  // loadConfig with a .json argument reads the file
+  const tmpDir = mkdtempSync(join(tmpdir(), 'graphdb-config-test-'));
+  try {
+    const file = join(tmpDir, 'config.json');
+    writeFileSync(file, JSON.stringify({ database: 'data/${GRAPHDB_TEST_NAME}.duckdb', bootstrapInInstructions: false }));
+    const config = loadConfig(file, { GRAPHDB_TEST_NAME: 'mine' });
+    assert.equal(config.DB_PATH, join(tmpDir, 'data', 'mine.duckdb'));
+    assert.equal(config.BOOTSTRAP_IN_INSTRUCTIONS, false);
+
+    writeFileSync(join(tmpDir, 'broken.json'), '{ "database": ');
+    assert.throws(() => loadConfig(join(tmpDir, 'broken.json'), env), /^Error: Invalid JSON in .*broken\.json: /);
+    assert.throws(() => loadConfig(join(tmpDir, 'missing.json'), env), /^Error: Unable to read config at .*missing\.json: /);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  console.log(' ✓ Config OK');
+}
+
 async function run() {
   console.log('Starting tests...\n');
   await testInstaller();
@@ -712,6 +782,7 @@ async function run() {
   await testVocabulary();
   await testTypeMerge();
   await testInstructions();
+  await testConfig();
   console.log('\nAll tests passed!');
 }
 
