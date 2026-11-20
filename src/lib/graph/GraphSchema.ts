@@ -233,12 +233,16 @@ export class GraphSchema {
     // before type validation existed can be migrated this way); an existing
     // target only with merge: true (rows move in, the target keeps its
     // definition); a source without a definition needs the new target
-    // defined in the same call.
+    // defined in the same call. A rename onto itself is refused: the type
+    // would leave the schema while its rows stay.
     private async checkRename(op: string, { from, to, merge }: TypeRename, currentTypes: Record<string, unknown>, incomingTypes: Record<string, unknown> | undefined, countRows: (type: string) => Promise<number>): Promise<void> {
+        if (from === to) {
+            throw new GraphError(`${op}: "from" and "to" are the same type "${from}" - nothing to rename. To change its description or properties, send it under nodes:/edges: without a migration.`)
+        }
         if (!currentTypes?.[from] && await countRows(from) === 0) {
             throw new GraphError(`${op}: source type "${from}" does not exist in current schema or data.`)
         }
-        if (currentTypes?.[to] && to !== from && !merge) {
+        if (currentTypes?.[to] && !merge) {
             throw new GraphError(`${op}: target type "${to}" already exists. Add merge: true to move all "${from}" rows into it, or choose a different name.`)
         }
         if (!currentTypes?.[from] && !currentTypes?.[to] && !incomingTypes?.[to]) {

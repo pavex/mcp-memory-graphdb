@@ -70,6 +70,19 @@ test('apply: invalid shapes rejected, additions patch, renames move rows, remova
 })
 
 
+test('a rename onto itself is refused and leaves the schema as it was', async t => {
+    const { datastore, schema } = await tempSchema(t)
+    schema.initDefault()
+    await datastore.addNode({ type: 'concept' })
+    for (const migration of [{ rename_node: { from: 'concept', to: 'concept' } }, { rename_node: { from: 'concept', to: 'concept', merge: true } }, { rename_edge: { from: 'uses', to: 'uses' } }]) {
+        await assert.rejects(schema.apply({ migrations: [migration] }), /"from" and "to" are the same type/)
+    }
+    assert.equal(schema.get()?.revision, 0)
+    assert.ok(schema.get()?.nodes.concept)
+    assert.equal(await datastore.countNodesByType('concept'), 1)
+})
+
+
 test('an empty schema.yaml (another session mid-write) loads as no schema', async t => {
     const { datastore } = await tempSchema(t)
     const path = join(tempFolder(t), 'schema.yaml')
