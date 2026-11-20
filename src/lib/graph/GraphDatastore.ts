@@ -248,10 +248,11 @@ export class GraphDatastore {
     }
 
 
+    // The query is plain text: % and _ in it match themselves, not any text.
     /** Nodes whose properties contain the query (case-insensitive), most recently updated first. */
     async search({ query, type, limit }: NodeSearch): Promise<GraphNode[]> {
-        const params: DuckDBValue[] = [`%${query}%`]
-        let sql = `SELECT ${NODE_COLUMNS} FROM nodes WHERE properties::text ILIKE $1`
+        const params: DuckDBValue[] = [`%${query.replace(/[\\%_]/g, '\\$&')}%`]
+        let sql = `SELECT ${NODE_COLUMNS} FROM nodes WHERE properties::text ILIKE $1 ESCAPE '\\'`
         if (type) {
             params.push(type)
             sql += ` AND type = $${params.length}`

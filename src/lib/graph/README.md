@@ -24,7 +24,7 @@ Every operation is **one unit of work**: it waits for the previous one of this `
 - `updateNode({ id, labels?, properties?, merge_from? })` → `{ node, merge?, warnings }`: labels replace, properties merge into the existing ones. `merge_from` merges duplicates into the node: their edges are redirected to it, edges that became self-loops or exact duplicates (same type, source and target) are dropped, the duplicates are deleted (`MergeResult`).
 - `deleteNode(id)`: with all its edges. `getNode(id)` (throws when missing), `findNode(id)` (null).
 - `addEdge({ id?, type, source_id, target_id, properties? })`: the type must be in the schema, both nodes must exist. `deleteEdge(id)`, `listEdges({ source_id?, target_id?, type?, limit })` newest first.
-- `search({ query, type?, limit })`: nodes whose properties contain the text (case-insensitive, `ILIKE`), most recently updated first.
+- `search({ query, type?, limit })`: nodes whose properties contain the text (case-insensitive, `ILIKE`; `%` and `_` in the text are plain characters), most recently updated first.
 - `schemaOverview()` → `{ revision, yaml, nodeCounts, labels, unknownTypes }`: `labels` are all labels in use with their counts, `unknownTypes` the node and edge types found in the data but not in the schema.
 - `applySchema(yaml)` → `{ schema, diff }`: see `GraphSchema.apply`.
 - `schemaSummary()` → `{ revision, summary }`: the types one line each, for people.

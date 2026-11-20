@@ -95,6 +95,21 @@ test('search: text inside properties, optional type, limit', async t => {
 })
 
 
+test('search: % and _ in the query are plain characters', async t => {
+    const { memory } = await tempMemory(t)
+    await memory.addNode({ id: 'percent', type: 'note', properties: { title: '100% done' } })
+    await memory.addNode({ id: 'digits', type: 'note', properties: { title: '1000 done' } })
+    await memory.addNode({ id: 'underscore', type: 'note', properties: { title: 'step_one' } })
+    await memory.addNode({ id: 'backslash', type: 'note', properties: { title: 'a\\b' } })
+    assert.deepEqual((await memory.search({ query: '100%', limit: 20 })).map(node => node.id), ['percent'])
+    assert.deepEqual((await memory.search({ query: '%', limit: 20 })).map(node => node.id), ['percent'])
+    assert.deepEqual((await memory.search({ query: '_00', limit: 20 })).map(node => node.id), [])
+    assert.deepEqual((await memory.search({ query: 'p_o', limit: 20 })).map(node => node.id), ['underscore'])
+    assert.deepEqual((await memory.search({ query: 'EP_ON', limit: 20 })).map(node => node.id), ['underscore'], 'still case-insensitive')
+    assert.equal((await memory.search({ query: '\\', limit: 20 })).length, 1, 'a backslash is plain too')
+})
+
+
 test('operations started at once run one after another; a failure does not block the next', async t => {
     const { memory } = await tempMemory(t)
     const results = await Promise.allSettled([
