@@ -118,6 +118,8 @@ test('errors: input checked against the schema, rules of the graph, unknown tool
     assert.equal(unknownType.isError, true)
     assert.match(unknownType.text, /^Error: Unknown node type "spaceship"\. Known types: /)
     assert.equal((await server.tool('get_node', { id: 'nobody' })).text, 'Error: Node not found: nobody')
+    assert.equal((await server.tool('add_node', { id: 'dup', type: 'note' })).isError, false)
+    assert.match((await server.tool('add_node', { id: 'dup', type: 'note' })).text, /^Error: Node already exists: dup\. /)
     assert.match((await server.tool('apply_schema', { yaml: 'bogus: 1' })).text, /^Error: Invalid schema: /)
     const unknown = await server.call('tools/call', { name: 'no_such_tool', arguments: {} })
     assert.equal(unknown.error?.code, -32602)

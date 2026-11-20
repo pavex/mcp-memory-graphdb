@@ -35,6 +35,18 @@ test('nodes: add, get, update with merged properties, delete with its edges', as
 })
 
 
+test('an id already in use is refused for a node and for an edge, with nothing changed', async t => {
+    const { memory } = await tempMemory(t)
+    await memory.addNode({ id: 'alice', type: 'person', properties: { name: 'Alice' } })
+    await memory.addNode({ id: 'bob', type: 'person' })
+    await memory.addEdge({ id: 'e1', source_id: 'alice', target_id: 'bob', type: 'knows' })
+    await assert.rejects(memory.addNode({ id: 'alice', type: 'note' }), (error: Error) => error instanceof GraphError && /^Node already exists: alice\. /.test(error.message))
+    await assert.rejects(memory.addEdge({ id: 'e1', source_id: 'bob', target_id: 'alice', type: 'knows' }), (error: Error) => error instanceof GraphError && /^Edge already exists: e1\. /.test(error.message))
+    assert.deepEqual((await memory.getNode('alice')).properties, { name: 'Alice' })
+    assert.equal((await memory.listEdges({ limit: 10 }))[0].source_id, 'alice')
+})
+
+
 test('property keys resembling declared or used keys warn', async t => {
     const { memory } = await tempMemory(t)
     await memory.addNode({ type: 'person', properties: { name: 'A', city: 'Praha' } })

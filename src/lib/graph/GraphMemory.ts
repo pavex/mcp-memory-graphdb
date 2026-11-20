@@ -64,6 +64,9 @@ export class GraphMemory {
     async addNode(node: NewNode): Promise<NodeWriteResult> {
         return this.run(async () => {
             this.schema.assertNodeType(node.type)
+            if (node.id !== undefined && await this.datastore.getNode(node.id)) {
+                throw new GraphError(`Node already exists: ${node.id}. Change it with update_node, or leave out id for a new node.`)
+            }
             const warnings = [...await this.propertyHints(node.type, node.properties), ...await this.labelHints(node.labels)]
             return { node: await this.datastore.addNode(node), warnings }
         })
@@ -119,6 +122,9 @@ export class GraphMemory {
             this.schema.assertEdgeType(edge.type)
             await this.requireNode(edge.source_id, 'source_id')
             await this.requireNode(edge.target_id, 'target_id')
+            if (edge.id !== undefined && await this.datastore.getEdge(edge.id)) {
+                throw new GraphError(`Edge already exists: ${edge.id}. Leave out id for a new edge.`)
+            }
             return this.datastore.addEdge(edge)
         })
     }
