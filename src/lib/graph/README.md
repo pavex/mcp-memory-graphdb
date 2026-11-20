@@ -41,7 +41,7 @@ Errors meant for the caller are `GraphError` with a message that says what to do
 - `rename_node: { from, to, merge? }` / `rename_edge`: moves every row in the database; the definition moves along unless the change redefines `to`. An existing `to` needs `merge: true` (the rows move in, `to` keeps its definition). A `from` found only in the data needs `to` defined in the same change.
 - `remove_node: { type }` / `remove_edge`: only for a type without rows.
 
-Migrations run only after all of them passed their checks; then `schema.yaml` is saved with the next revision. `reload()` re-reads the file when its content changed; an empty file (another process mid-write) loads as no schema.
+Migrations run only after all of them passed their checks; then `schema.yaml` is saved with the next revision, still inside the transaction of the migrations: a failed save rolls them back, and when the commit fails after the save, `GraphMemory` puts the previous file back (`snapshot()` / `restore()`). The file is replaced atomically (a temporary file renamed over it), so a process reading it without the database lock sees the old schema or the new one. `reload()` re-reads the file when its content changed; an empty file loads as no schema.
 
 ### `GraphDatastore`
 

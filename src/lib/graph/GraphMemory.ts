@@ -51,7 +51,7 @@ export class GraphMemory {
     /** Prepares the database and loads schema.yaml, writing the default schema the first time. */
     async open(): Promise<void> {
         await this.datastore.open()
-        this.schema.ensure()
+        await this.schema.ensure()
     }
 
 
@@ -207,11 +207,23 @@ export class GraphMemory {
     }
 
 
-    // Queued after the previous unit of work, which may have failed.
+    // Queued after the previous unit of work, which may have failed. The
+    // connection (and with it the file lock) is held around the transaction,
+    // so schema.yaml is read, and restored when the transaction fails after
+    // apply_schema saved it, while no other session can touch either.
     private run<T>(work: () => Promise<T>): Promise<T> {
-        const result = this.queue.then(() => this.datastore.transaction(async () => {
+        const result = this.queue.then(() => this.datastore.withConnection(async () => {
             this.schema.reload()
-            return work()
+            const snapshot = this.schema.snapshot()
+            try {
+                return await this.datastore.transaction(work)
+            }
+            catch (error) {
+                await this.schema.restore(snapshot).catch(restoreError => {
+                    throw new Error(`${(error as Error).message}; schema.yaml could not be restored: ${(restoreError as Error).message}`)
+                })
+                throw error
+            }
         }))
         this.queue = result.catch(() => undefined)
         return result

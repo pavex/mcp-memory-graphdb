@@ -1,7 +1,8 @@
 import { dump, load } from 'js-yaml'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { GraphDatastore } from './GraphDatastore'
 import { GraphError } from './GraphError'
+import { writeFileAtomic } from './GraphSchema/AtomicFile'
 import { validateSchemaChange } from './GraphSchema/SchemaValidator'
 import type { EdgeTypeDefinition } from './interfaces/EdgeTypeDefinition'
 import type { NodeTypeDefinition } from './interfaces/NodeTypeDefinition'
@@ -20,12 +21,14 @@ const DUMP_OPTIONS = { lineWidth: 120, quoteStyle: 'double' } as const
 // `edges:` are patches (types not mentioned stay as they are), and the only
 // way to rename or remove a type is an explicit `migrations` entry. Several
 // sessions (processes) share the file, so reload() re-reads it when another
-// one changed it; callers hold the database lock while they do that.
+// one changed it; callers hold the database lock while they do that. The
+// file is replaced atomically, so a reader without the lock (a session
+// starting) sees the old schema or the new one, never a part.
 /** The schema of the graph: node and edge types, and their migrations. */
 export class GraphSchema {
 
     private schema: SchemaDocument | undefined = undefined
-    // The last schema.yaml content seen, for reload().
+    // The last schema.yaml content seen or written, for reload() and restore().
     private raw: string | null = null
 
 
@@ -39,17 +42,36 @@ export class GraphSchema {
 
 
     /** Loads schema.yaml, or writes the default schema when there is none yet. */
-    ensure(): void {
+    async ensure(): Promise<void> {
         if (this.exists()) {
             this.load()
         }
         else {
-            this.initDefault()
+            await this.initDefault()
         }
     }
 
 
-    /** Reads schema.yaml; an empty file (another session mid-write) gives undefined. */
+    /** The schema.yaml content as last seen or written, for restore(). */
+    snapshot(): string | null {
+        return this.raw
+    }
+
+
+    // apply() saves before its transaction commits, so a failed save rolls
+    // the migrations back; this undoes the save when the commit fails.
+    /** Writes back a snapshot when schema.yaml changed since it was taken. */
+    async restore(snapshot: string | null): Promise<void> {
+        if (snapshot === null || snapshot === this.raw) {
+            return
+        }
+        await writeFileAtomic(this.path, snapshot)
+        this.schema = parse(snapshot)
+        this.raw = snapshot
+    }
+
+
+    /** Reads schema.yaml; an empty file gives undefined. */
     load(): SchemaDocument | undefined {
         const raw = readFileSync(this.path, 'utf8')
         this.schema = parse(raw)
@@ -73,12 +95,12 @@ export class GraphSchema {
 
 
     /** Writes the default schema (schema.default.yaml) as schema.yaml. */
-    initDefault(): SchemaDocument {
+    async initDefault(): Promise<SchemaDocument> {
         const schema = parse(readFileSync(this.defaultPath, 'utf8'))
         if (!schema) {
             throw new Error(`The default schema is empty: ${this.defaultPath}`)
         }
-        this.save(schema)
+        await this.save(schema)
         return schema
     }
 
@@ -168,7 +190,7 @@ export class GraphSchema {
         const renamedNodes = migrations.flatMap(migration => (migration.rename_node ? [migration.rename_node] : []))
         const renamedEdges = migrations.flatMap(migration => (migration.rename_edge ? [migration.rename_edge] : []))
         const next: SchemaDocument = { revision: (current.revision ?? 0) + 1, nodes: nextNodes, edges: nextEdges }
-        this.save(next)
+        await this.save(next)
         return {
             schema: next,
             diff: {
@@ -221,9 +243,9 @@ export class GraphSchema {
     }
 
 
-    private save(schema: SchemaDocument): void {
+    private async save(schema: SchemaDocument): Promise<void> {
         const yaml = dump(schema, DUMP_OPTIONS)
-        writeFileSync(this.path, yaml, 'utf8')
+        await writeFileAtomic(this.path, yaml)
         this.schema = schema
         this.raw = yaml
     }
@@ -263,9 +285,8 @@ export class GraphSchema {
 }
 
 
-// load() throws on an empty document; startup reads schema.yaml without the
-// database lock, so it can catch another session's write right after the
-// truncate.
+// load() throws on an empty document; an empty file (written by hand, or by
+// a version that did not write atomically) counts as no schema.
 function parse(raw: string): SchemaDocument | undefined {
     return raw.trim() ? load(raw) as SchemaDocument : undefined
 }
