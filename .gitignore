@@ -5,3 +5,4 @@ dist-*/
 *.duckdb
 *.duckdb.wal
 .claude
+mcpb/

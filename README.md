@@ -58,7 +58,7 @@ It runs on [DuckDB](https://duckdb.org), an embedded, file-based analytical data
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) 20 or later
+- [Node.js](https://nodejs.org) 20 or later to run the server; 22 or later to build and test it
 - Windows, macOS or Linux (glibc or musl), x64 or arm64 — see [Compatibility](#compatibility) below
 - An MCP-compatible client: [Claude Desktop](https://claude.ai/download), [Claude Code](https://docs.claude.com/en/docs/claude-code), or any other MCP host
 
@@ -204,6 +204,8 @@ From then on, every conversation that connects to this server can read and write
 | `dreaming` | Get a paginated batch of nodes with their immediate edges, for guided cleanup — merging duplicates and adding missing relationships (see below). |
 | `bootstrap` | Load whatever identity, user context and working rules the agent has saved for itself, in one call (see below). |
 
+Arguments are checked against each tool's input schema before the tool runs: a missing or wrong argument comes back as a tool error `Input validation error: Invalid arguments for tool …`. Any other failure is a tool error `Error: <what is wrong>` (an unknown type, a missing node, a rejected schema change, a busy database); one that is a fault of the server is also written to stderr. An unknown tool name is a JSON-RPC error (`-32602`).
+
 There is deliberately **no raw query tool**. Letting an agent run arbitrary SQL against the memory store is a bigger attack surface than the convenience is worth; the tools above cover the realistic range of what an agent needs to read and write memory safely.
 
 ## Working with the schema
@@ -313,32 +315,38 @@ The text ends up in the system prompt of every session, in every client that use
 
 ## Project structure
 
+TypeScript, in the layout of the other MCP servers of the hub (code style: `mcp-hub-v2/docs/code-style.md`, `npm run style`).
+
 ```
 mcp-memory-graphdb/
-├── schema.default.yaml        # revision 0 — the schema a fresh database starts with
+├── schema.default.yaml         # revision 0 — the schema a fresh database starts with, copied to dist/
 ├── config.example.json         # example configuration file, copied to dist/
 ├── manifest.json               # .mcpb / Desktop Extension manifest
-├── build.mjs / build.cmd / build.sh    # bundle + copy native DuckDB bindings + test
-├── mcpb.cmd / mcpb.sh           # package dist/ into a .mcpb file
+├── esbuild.config.mjs          # bundle src/main.ts → dist/mcp.js + native DuckDB bindings; --mcpb packs
+├── build.cmd / build.sh        # npm ci → typecheck + build → tests → node_modules removed
+├── mcpb.cmd / mcpb.sh          # the same, packing dist/ into a .mcpb file
+├── scripts/restyle.mjs         # npm run style
 ├── src/
-│   ├── mcp.js                  # server entry point — tool & prompt registration
-│   ├── Config.js                # first argument: database path or .json config; bootstrap switch
-│   ├── Datastore/
-│   │   ├── InstallerDatastore.js   # creates the nodes/edges tables
-│   │   └── GraphDatastore.js       # all node/edge CRUD + search + schema-migration primitives
-│   ├── Schema/
-│   │   ├── DefaultSchema.js        # loads schema.default.yaml
-│   │   ├── SchemaManager.js        # the deterministic apply() process
-│   │   └── SchemaValidator.js      # strict structural validation (Zod)
-│   ├── Tools/                   # one file per tool group (incl. DreamingTool.js, BootstrapTool.js)
-│   ├── Prompts/
-│   │   ├── OnboardingPrompt.js      # the "setup" MCP prompt
-│   │   └── ServerInstructions.js    # the MCP instructions text
-│   └── Utils/
-│       └── Schemas.js            # Zod input schemas for every tool
+│   ├── main.ts                 # entry point of mcp.js: config, then Application.start
+│   ├── Application.ts          # boot, instructions, one McpServer per connection (serveStdio)
+│   ├── ApplicationContainer.ts # the services, lazy getters
+│   ├── Consts.ts               # server name and version, the bootstrap node id, file names
+│   ├── config/                 # first argument: database name/path or .json config; bootstrap switch
+│   ├── log/Logger.ts           # one timestamped line per event on stderr
+│   ├── instructions/           # the MCP instructions text (with the _bootstrap node)
+│   ├── prompts/                # the "setup" prompt and MemoryPrompts, which registers it
+│   ├── tools/                  # Tool (base class), MemoryTools (registers all), one class per tool
+│   └── lib/graph/              # the graph memory itself, no MCP — see its README
+│       ├── GraphMemory.ts      # one serialized transaction per operation, the rules of the graph
+│       ├── GraphDatastore.ts   # DuckDB: node/edge CRUD, search, vocabulary, migration primitives
+│       ├── GraphSchema.ts      # schema.yaml and the deterministic apply() process
+│       └── Labels.ts, Similarity.ts
 └── test/
-    ├── unit.js                  # datastore + schema manager unit tests
-    └── integration.js           # full stdio JSON-RPC round-trip, src and dist
+    ├── structure.test.ts       # import boundaries, tools as classes, the build
+    ├── lib/graph/              # the memory against real DuckDB databases
+    ├── config/, instructions/, prompts/
+    ├── deployment/stdio.test.ts  # the built dist/mcp.js over stdio, as clients run it
+    └── support/                # TypeScript loader for node --test, helpers
 ```
 
 ## Development
@@ -349,20 +357,20 @@ mcp-memory-graphdb/
 npm test
 ```
 
-This runs `test/unit.js` (in-memory DuckDB, no real files touched) followed by `test/integration.js` against both `src/` and `dist/` — spawning the actual server process and talking JSON-RPC over stdio, exactly as a real MCP client would.
+Builds `dist/` (with a typecheck), then runs every `test/**/*.test.ts` with `node --test` straight from the TypeScript sources (`npm run test:run` skips the build). The library tests use real DuckDB files in temp folders; `test/deployment/` spawns `dist/mcp.js` and talks JSON-RPC over stdio, exactly as a real MCP client would — including two sessions sharing one database file and both protocol eras.
 
 ### Building
 
 ```bash
-node build.mjs
+npm run build
 ```
 
-Bundles `src/mcp.js` with esbuild, copies the platform-specific native DuckDB bindings (`duckdb.node` plus the platform shared library) into `dist/`, and copies `schema.default.yaml` and `config.example.json` alongside. `build.cmd` / `build.sh` wrap this with a full install → build → test → cleanup cycle, ending in an audible beep so you don't have to watch the terminal.
+Typechecks, bundles `src/main.ts` with esbuild into `dist/mcp.js`, copies the platform-specific native DuckDB bindings (`duckdb.node` plus the platform shared library) into `dist/`, and copies `schema.default.yaml` and `config.example.json` alongside. Native files that did not change are left alone, so a build works while running sessions use `dist/`. `build.cmd` / `build.sh` wrap this with a full clean install → build → test → cleanup cycle, ending in an audible beep so you don't have to watch the terminal.
 
 ### Packaging as a .mcpb extension
 
 ```bash
-node build.mjs --mcpb
+npm run build -- --mcpb
 ```
 
 or simply run `mcpb.cmd` / `mcpb.sh`, which do the full install → build → package → cleanup cycle in one go. The result is `mcpb/mcp-memory-graphdb.mcpb`, ready to double-click into Claude Desktop.
@@ -377,7 +385,7 @@ This is **Phase 2** of the project — graph CRUD, a fully deterministic and val
 
 ## Compatibility
 
-Native DuckDB bindings are platform-specific, and `build.mjs` copies the ones for the machine it runs on. DuckDB ships official bindings for Windows, macOS and Linux on x64 and arm64; on Linux the build picks the glibc or musl (Alpine) variant automatically.
+Native DuckDB bindings are platform-specific, and `esbuild.config.mjs` copies the ones for the machine it runs on. DuckDB ships official bindings for Windows, macOS and Linux on x64 and arm64; on Linux the build picks the glibc or musl (Alpine) variant automatically.
 
 Built and tested on **Windows (x64)** and on **Linux x64** with both glibc (Debian) and musl (Alpine). macOS should work the same way but has not been tested yet.
 
